@@ -1,0 +1,21 @@
+﻿<wpf:ResourceDictionary xml:space="preserve" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:s="clr-namespace:System;assembly=mscorlib" xmlns:ss="urn:shemas-jetbrains-com:settings-storage-xaml" xmlns:wpf="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
+	
+	<s:String x:Key="/Default/Environment/AssemblyExplorer/XmlDocument/@EntryValue">&lt;AssemblyExplorer&gt;&#xD;
+  &lt;Assembly Path="C:\Users\Georgii\.nuget\packages\system.io.pipelines\8.0.0\lib\net6.0\System.IO.Pipelines.dll" /&gt;&#xD;
+  &lt;Assembly Path="C:\Program Files\dotnet\shared\Microsoft.NETCore.App\6.0.29\System.Threading.Channels.dll" /&gt;&#xD;
+  &lt;Assembly Path="C:\Program Files\dotnet\shared\Microsoft.NETCore.App\6.0.29\System.Private.CoreLib.dll" /&gt;&#xD;
+  &lt;Assembly Path="D:\free\redis-client\RedisF1\Respace.CommandsSyntax\bin\Debug\netstandard2.0\Respace.CommandsSyntax.dll" /&gt;&#xD;
+  &lt;Assembly Path="D:\free\redis-client\respsody\Respace.CommandsSyntax\bin\Debug\netstandard2.0\Respace.CommandsSyntax.dll" /&gt;&#xD;
+  &lt;Assembly Path="C:\Users\Georgii\.nuget\packages\benchmarkdotnet.annotations\0.13.12\lib\netstandard2.0\BenchmarkDotNet.Annotations.dll" /&gt;&#xD;
+  &lt;Assembly Path="C:\Users\Georgii\.nuget\packages\pipelines.sockets.unofficial\2.2.8\lib\net5.0\Pipelines.Sockets.Unofficial.dll" /&gt;&#xD;
+  &lt;Assembly Path="C:\Users\Georgii\.nuget\packages\microsoft.extensions.logging.console\9.0.3\lib\net9.0\Microsoft.Extensions.Logging.Console.dll" /&gt;&#xD;
+  &lt;Assembly Path="C:\Users\Georgii\.nuget\packages\xunit.extensibility.core\2.9.3\lib\netstandard1.1\xunit.core.dll" /&gt;&#xD;
+&lt;/AssemblyExplorer&gt;</s:String>
+	
+	
+	
+	
+	
+	
+	
+	<s:String x:Key="/Default/Profiling/Configurations/=2/@EntryIndexedValue">&lt;data&gt;&lt;HostParameters type="LocalHostParameters" /&gt;&lt;Argument type="StandaloneArgument"&gt;&lt;Arguments IsNull="False"&gt;&lt;/Arguments&gt;&lt;FileName IsNull="False"&gt;&lt;/FileName&gt;&lt;WorkingDirectory IsNull="False"&gt;&lt;/WorkingDirectory&gt;&lt;Scope&gt;&lt;ProcessFilters /&gt;&lt;/Scope&gt;&lt;/Argument&gt;&lt;Info type="TimelineInfo"&gt;&lt;EnableNativeAllocations&gt;True&lt;/EnableNativeAllocations&gt;&lt;LoadPdb&gt;True&lt;/LoadPdb&gt;&lt;SamplesPerSec&gt;2000&lt;/SamplesPerSec&gt;&lt;/Info&gt;&lt;CoreOptions type="CoreOptions"&gt;&lt;CoreTempPath IsNull="False"&gt;&lt;/CoreTempPath&gt;&lt;RemoteEndPoint IsNull="False"&gt;&lt;/RemoteEndPoint&gt;&lt;AdditionalEnvironmentVariables&gt;&lt;Item&gt;&lt;Key&gt;DOTNET_ENVIRONMENT&lt;/Key&gt;&lt;Value&gt;Development&lt;/Value&gt;&lt;/Item&gt;&lt;Item&gt;&lt;Key&gt;RESHARPER_HOST_VERSION&lt;/Key&gt;&lt;Value&gt;233.0.20240306.114926&lt;/Value&gt;&lt;/Item&gt;&lt;Item&gt;&lt;Key&gt;RESHARPER_TESTRUNNER&lt;/Key&gt;&lt;Value&gt;Profile&lt;/Value&gt;&lt;/Item&gt;&lt;Item&gt;&lt;Key&gt;RESHARPER_HOST&lt;/Key&gt;&lt;Value&gt;ReSharperPlatformVs17&lt;/Value&gt;&lt;/Item&gt;&lt;/AdditionalEnvironmentVariables&gt;&lt;/CoreOptions&gt;&lt;HostOptions type="HostOptions"&gt;&lt;HostTempPath IsNull="False"&gt;&lt;/HostTempPath&gt;&lt;ReprofileDisableReason&gt;LaunchedByReSharperUnitTestRunner&lt;/ReprofileDisableReason&gt;&lt;/HostOptions&gt;&lt;/data&gt;</s:String></wpf:ResourceDictionary>

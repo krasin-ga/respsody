@@ -1,0 +1,27 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+	<IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+	<PropertyGroup>
+		<ServerGarbageCollection>true</ServerGarbageCollection>
+		<GarbageCollectionAdaptationMode>false</GarbageCollectionAdaptationMode>
+	</PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" Version="0.15.1" />
+    <PackageReference Include="Microsoft.Garnet" Version="1.0.72" />
+    <PackageReference Include="StackExchange.Redis" Version="2.8.41" />
+  </ItemGroup>
+
+  <ItemGroup>
+	  <ProjectReference Include="..\..\src\Respsody\Respsody.csproj" />
+	  <ProjectReference Include="..\..\src\Respsody.Generators\Respsody.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,36 @@
+<Project>
+
+  <PropertyGroup>
+    <SourceRoot>$(MSBuildThisFileDirectory)</SourceRoot>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <Authors>Georgy Krasin</Authors>
+    <Description>General purpose RESP client</Description>
+    <Product>Respody</Product>
+    <Copyright>© Georgy Krasin. All rights reserved.</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/krasin-ga/respsody</PackageProjectUrl>
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageTags>RESP client</PackageTags>
+    <PackageReleaseNotes></PackageReleaseNotes>
+    <PublicRepositoryUrl>https://github.com/krasin-ga/respsody</PublicRepositoryUrl>
+    <PrivateRepositoryUrl>https://github.com/krasin-ga/respsody</PrivateRepositoryUrl>
+    <RepositoryUrl>https://github.com/krasin-ga/respsody</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <DebugType>embedded</DebugType>
+    <IncludePackageReferencesDuringMarkupCompilation>true</IncludePackageReferencesDuringMarkupCompilation>
+    <IncludeSymbols>false</IncludeSymbols>
+    <IncludeSource>false</IncludeSource>
+    <Version>0.0.1-alpha</Version>
+    <PackageReadmeFile>NugetReadme.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="$(SourceRoot)assets/icon.png" Pack="true" Visible="false" PackagePath="/" />
+    <None Include="$(SourceRoot)assets/NugetReadme.md" Pack="true" Visible="false" PackagePath="/" />
+  </ItemGroup>
+
+</Project>

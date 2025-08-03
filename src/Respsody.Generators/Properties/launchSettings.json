@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "Debug Roslyn": {
+      "commandName": "DebugRoslynComponent",
+      "targetProject": "..\\..\\util\\Respsody.Benchmarks.NonScientific\\Respsody.Benchmarks.NonScientific.csproj"
+    }
+  }
+}
