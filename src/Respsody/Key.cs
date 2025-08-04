@@ -12,7 +12,7 @@ namespace Respsody;
 public readonly struct Key
 {
     private readonly string? _string;
-    private readonly Memory<byte>? _memory;
+    private readonly ReadOnlyMemory<byte>? _memory;
     private readonly Encoding? _stringEncoding;
     private const ushort Zero = 0;
 
@@ -22,7 +22,7 @@ public readonly struct Key
         _stringEncoding = encoding;
     }
 
-    public Key(Memory<byte> memory)
+    public Key(ReadOnlyMemory<byte> memory)
     {
         _memory = memory;
     }

@@ -205,4 +205,47 @@ public class Tests(IDatabaseAsync db, IRespClient client)
 
         return j;
     }
+
+    public async Task<int> SetGet_WhenEach_Adapted(Target target, KeyValuePair<string, byte[]>[] values)
+    {
+        if (target is Target.Respsody)
+        {
+            var i = 0;
+            var l = 0;
+            var (seValuesForRsp, _) = DataCache.AsSe(values);
+
+            await foreach (var res in Task.WhenEach(
+                               seValuesForRsp.SelectTaskRun(
+                                   async v =>
+                                   {
+                                       var key = new Key(v.Key!);
+
+                                       await client.Set(key, new Value(v.Value!));
+                                       using var val = await client.Get(key);
+                                       RedisValue seValue = val.GetSpan().ToArray();
+                                       l += (int)seValue.Length();
+                                   })))
+            {
+                i++;
+            }
+
+            return i+l;
+        }
+
+        var j = 0;
+        var (seValues, _) = DataCache.AsSe(values);
+
+        await foreach (var res in Task.WhenEach(
+                           seValues.SelectTaskRun(
+                               async v =>
+                               {
+                                   await db.StringSetAsync(v.Key, v.Value);
+                                   await db.StringGetAsync(v.Key);
+                               })))
+        {
+            j++;
+        }
+
+        return j;
+    }
 }

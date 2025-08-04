@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Buffers;
-using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using System.Text;
 using Respsody.Exceptions;
@@ -14,7 +13,7 @@ namespace Respsody;
 public readonly struct Value
 {
     private readonly string? _string;
-    private readonly Memory<byte>? _memory;
+    private readonly ReadOnlyMemory<byte>? _memory;
     private readonly Encoding? _stringEncoding;
 
     public Value(string value, Encoding? encoding = null)
@@ -23,7 +22,7 @@ public readonly struct Value
         _stringEncoding = encoding;
     }
 
-    public Value(Memory<byte> memory)
+    public Value(ReadOnlyMemory<byte> memory)
     {
         _memory = memory;
     }
@@ -69,7 +68,7 @@ public readonly struct Value
 
     public static Value Unicode(string str) => new(str, Encoding.Unicode);
     public static Value Utf8(string str) => new(str, Encoding.UTF8);
-    public static Value Memory(Memory<byte> memory) => new(memory);
+    public static Value Memory(ReadOnlyMemory<byte> memory) => new(memory);
     public static Value ByteArray(byte[] memory) => new(memory);
 
 }

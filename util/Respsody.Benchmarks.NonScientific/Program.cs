@@ -102,6 +102,9 @@ BenchmarkResult[] results =
 
     await RunTest(tests.MSetGet, Target.Respsody, large_300, iterations: iters),
     await RunTest(tests.MSetGet, Target.StackOverflowRedis, large_300, iterations: iters),
+
+    await RunTest(tests.SetGet_WhenEach_Adapted, Target.Respsody, small_20K, iterations: iters),
+    await RunTest(tests.SetGet_WhenEach_Adapted, Target.StackOverflowRedis, small_20K, iterations: iters),
 ];
 Console.WriteLine(BenchmarkResult.WriteTable(results));
 
