@@ -7,12 +7,7 @@ namespace Respsody.Generators.Syntax;
 
 internal class KeySyntaxNode : SyntaxNode
 {
-    public override ICommandMethodBuilder MethodBuilder { get; }
-
-    public KeySyntaxNode()
-    {
-        MethodBuilder = new KeyBuilder();
-    }
+    public override ICommandMethodBuilder MethodBuilder { get; } = new KeyBuilder();
 
     protected override bool IsEquivalentTo(SyntaxNode node)
         => node is KeySyntaxNode;

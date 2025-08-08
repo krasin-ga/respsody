@@ -52,6 +52,22 @@ public class ServerTests(GarnetFixture fixture, ITestOutputHelper @out) : IClass
     }
 
     [Fact]
+    public async Task ShouldExecuteEvalsWithConstants()
+    {
+        var client = await new RespClientFactory().Create(fixture.GetEndpoint());
+
+        var key = new Key(Guid.NewGuid().ToString(), Encoding.UTF8);
+        await client.Set(key, Value.Utf8("0"));
+
+        using var evalIncr = await client.EvalIncrBy(EVAL.INCR, EVAL.INCR_NUM_KEYS, key, 10);
+        Assert.Equal(expected: 10L, evalIncr.ToInt64());
+
+        using var incr2 = await client.Incr(key);
+
+        Assert.Equal(expected: 11L, incr2.ToInt64());
+    }
+
+    [Fact]
     public async Task ShouldDisconnectOnIdle()
     {
         var garnet = GarnetFixture.CreateGarnet();

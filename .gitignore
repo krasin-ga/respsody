@@ -48,7 +48,7 @@ CodeCoverage/
 # MSTest test Results
 [Tt]est[Rr]esult*/
 [Bb]uild[Ll]og.*
-
+*sln.DotSettings.user
 # NUnit
 *.VisualState.xml
 TestResult.xml

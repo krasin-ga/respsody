@@ -7,5 +7,4 @@ internal static class NodeType
     public const string OneOff = "OneOff";
     public const string Or = "|";
     public const string Key = "key";
-    public const string Array = "...";
 }

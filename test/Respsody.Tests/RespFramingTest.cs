@@ -68,7 +68,7 @@ public class RespFramingTest(ITestOutputHelper testOutputHelper)
     }
 
     [Fact]
-    public void Must_correctly_slice_input2()
+    public void Must_correctly_slice_input_variations()
     {
         var testCases = Enumerable.Range(0, 2048 * 2).Select(i => new string((char)i, i + 1)).ToArray();
 

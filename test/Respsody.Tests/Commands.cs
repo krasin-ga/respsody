@@ -20,4 +20,7 @@ namespace Respsody.Tests;
 [RespCommand("MULTI", ResponseType.Void)]
 [RespCommand("EXEC", ResponseType.Array)]
 [RespCommand("INCR key", ResponseType.Number)]
+[RespCommand("INCR key", ResponseType.Number)]
+[RespCommand("EVAL script:string numkeys:int [key [key ...]] [arg:value [arg:value ...]]", ResponseType.Untyped)]
+[RespCommand("EVAL INCR=`return redis.call('incrby', KEYS[1], ARGV[1])` INCR_NUM_KEYS=`1` key arg:int", ResponseType.Number, MethodName = "EvalIncrBy")]
 public static class Commands;

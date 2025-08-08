@@ -10,28 +10,13 @@ internal class RawNode(string value)
         Children.Add(node);
     }
 
-    public IEnumerable<IReadOnlyList<RawNode>> SplitByValue(string value)
+    public bool Is(string token)
     {
-        var group = new List<RawNode>();
-
-        foreach (var rawNode in Children)
-        {
-            if (rawNode.Value == value)
-            {
-                yield return group;
-                group = [];
-                continue;
-            }
-
-            group.Add(rawNode);
-        }
-
-        if (group.Count > 0)
-            yield return group;
+        return Value == token;
     }
 
-    public bool Is(string value)
+    public bool IsConstantLiteral()
     {
-        return Value == value;
+        return Value.StartsWith("`");
     }
 }

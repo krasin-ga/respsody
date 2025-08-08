@@ -30,7 +30,7 @@ internal class CommandSyntaxParser
         if (node.Is(NodeType.Key))
             return new KeySyntaxNode();
 
-        if (token.All(c => char.IsUpper(c) && char.IsLetter(c)))
+        if (OptionSyntaxNode.MatchFormat(token))
             return new OptionSyntaxNode(token);
 
         if (char.IsLower(token[0]) && token.All(c => c is ':' or '-' || char.IsLetter(c)))

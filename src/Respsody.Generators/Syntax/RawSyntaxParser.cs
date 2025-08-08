@@ -1,4 +1,6 @@
-﻿namespace Respsody.Generators.Syntax;
+﻿using System.Text.RegularExpressions;
+
+namespace Respsody.Generators.Syntax;
 
 internal class RawSyntaxParser
 {
@@ -14,9 +16,24 @@ internal class RawSyntaxParser
     {
         var tokens = new List<string>();
         var token = new StringBuilder();
-
+        var appendingConstant = false;
         foreach (var c in input)
         {
+            if (c == '`' || appendingConstant)
+            {
+                token.Append(c);
+
+                if (appendingConstant && c == '`')
+                {
+                    PushCurrentToken(token, tokens);
+                    appendingConstant = false;
+                    continue;
+                }
+
+                appendingConstant = true;
+                continue;
+            }
+
             if (char.IsWhiteSpace(c))
             {
                 PushCurrentToken(token, tokens);
@@ -25,20 +42,20 @@ internal class RawSyntaxParser
             {
                 PushCurrentToken(token, tokens);
                 tokens.Add(c.ToString());
-
-            } else if (c == '.')
+            }
+            else if (c == '.')
             {
                 var allDots = true;
                 for (var i = 0; i < token.Length; i++)
                 {
                     if (token[i] == '.')
                         continue;
-                    
+
                     allDots = false;
                     break;
                 }
 
-                if(!allDots)
+                if (!allDots)
                     PushCurrentToken(token, tokens);
 
                 token.Append(c);
@@ -87,6 +104,16 @@ internal class RawSyntaxParser
             {
                 var child = ParseNode(tokens, NodeType.OneOff, expectedEnd: ">", ref index);
                 root.AddChild(child);
+
+                continue;
+            }
+
+            if (token.Contains("`"))
+            {
+                if (expectedEnd != null)
+                    throw new FormatException("Literals are not allowed inside blocks");
+
+                root.AddChild(new RawNode(token));
 
                 continue;
             }

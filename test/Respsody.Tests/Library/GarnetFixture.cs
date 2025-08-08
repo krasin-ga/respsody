@@ -25,7 +25,9 @@ public sealed class GarnetFixture : IDisposable
                 garnet = new GarnetServer(new GarnetServerOptions
                 {
                     EndPoints = [endpoint],
-                    PageSize = "256m"
+                    PageSize = "256m",
+                    EnableLua = true,
+                    LuaOptions = new LuaOptions()
                 });
 
                 garnet.Start();

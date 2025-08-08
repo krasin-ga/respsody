@@ -256,7 +256,7 @@ internal static class Build
                                         .WithInitializer(
                                             EqualsValueClause(
                                                 ParseExpression(
-                                                    $"ProtocolWriter.ConvertToBulkString(\"{option.Option}\")"
+                                                    $"ProtocolWriter.ConvertToBulkString(\"{option.Value}\")"
                                                 )))
                                 )))
                     .WithModifiers(
