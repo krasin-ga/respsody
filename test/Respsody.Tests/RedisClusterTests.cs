@@ -23,9 +23,10 @@ public class RedisClusterTests(RedisClusterFixture fixture, ITestOutputHelper @o
     [Fact]
     public async Task TestClusterFunctionality()
     {
-        var clusterRouter = new ClusterRouter(
+        using var clusterRouter = new ClusterRouter(
             new ClusterRouterOptions
             {
+                ClusterRouterHandler = new TestClusterRouterHandler(@out),
                 EnableAutoRedirections = true,
                 SeedEndpoints = [fixture.GetRandomEndpoint()],
                 ClientOptions = new RespClientOptions

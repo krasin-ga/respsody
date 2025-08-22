@@ -1,5 +1,4 @@
-﻿using Respsody.Exceptions;
-using Respsody.Memory;
+﻿using Respsody.Memory;
 
 namespace Respsody.Resp;
 

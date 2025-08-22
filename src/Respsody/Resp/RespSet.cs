@@ -4,7 +4,7 @@ using Respsody.Memory;
 
 namespace Respsody.Resp;
 
-public readonly struct RespSet(RespAggregate respAggregate) : IDisposable, IRespResponse
+public readonly struct RespSet(RespAggregate respAggregate) : IRespResponse
 {
     public int Length { get; } = respAggregate.Length - 1;
     public RespValueVariant this[int i] => respAggregate[i + 1];

@@ -4,7 +4,7 @@ using Respsody.Memory;
 
 namespace Respsody.Resp;
 
-public readonly struct RespBoolean : IDisposable, IRespResponse
+public readonly struct RespBoolean : IRespResponse
 {
     private readonly Frame<RespContext> _frame;
 

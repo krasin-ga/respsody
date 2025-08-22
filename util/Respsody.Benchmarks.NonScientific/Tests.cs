@@ -1,5 +1,4 @@
-﻿using System.Runtime.CompilerServices;
-using System.Text.Json;
+﻿using System.Text.Json;
 using Respsody.Benchmarks.NonScientific.Library;
 using Respsody.Client;
 using StackExchange.Redis;

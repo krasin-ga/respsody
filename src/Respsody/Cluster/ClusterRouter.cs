@@ -11,17 +11,25 @@ using Respsody.Resp;
 
 namespace Respsody.Cluster;
 
-public sealed class ClusterRouter
+public sealed class ClusterRouter : IDisposable
 {
     private readonly RoleRouter _anyRouter;
+    private readonly CancellationTokenSource _cancellation;
     private readonly MemoryBlocks _memoryBlocks;
     private readonly ClusterRouterOptions _options;
+    private readonly int _outgoingBlockSize;
     private readonly RoleRouter _preferReplicaRouter;
     private readonly RoleRouter _primaryRouter;
     private readonly RoleRouter _replicaRouter;
-    private ClusterState? _state;
+    private readonly TimeSpan _syncInterval;
+    private bool _isInitialized;
     private int _isSyncing;
-    private int _outgoingBlockSize;
+    private ClusterState? _state;
+    private int _syncTimerStarted;
+    private bool _isDisposed;
+
+    public IReadOnlyDictionary<string, object> Metadata => _options.Metadata;
+
     public ClusterRouter(ClusterRouterOptions options)
     {
         _options = options;
@@ -31,36 +39,90 @@ public sealed class ClusterRouter
         _preferReplicaRouter = new RoleRouter(RolePreference.PreferReplica, this);
         _replicaRouter = new RoleRouter(RolePreference.Replica, this);
         _outgoingBlockSize = options.ClientOptions.OutgoingMemoryBlockSize;
+        _syncInterval = options.SyncInterval;
+        _cancellation = new CancellationTokenSource();
     }
 
     public async Task Initialize()
     {
-        await UpdateClusterState(_options.SeedEndpoints);
-    }
+        ObjectDisposedException.ThrowIf(_isDisposed, this);
 
-    private async Task UpdateClusterState(IEnumerable<string> endpoints)
-    {
-        foreach (var seedEndpoint in endpoints)
-        {
-            await UpdateClusterStateFromSeed(seedEndpoint);
-            break;
-        }
-
-        if (_state is { })
-            _ = Task.WhenAll(_state.Nodes.Select(n => n.Client.Connect()));
-    }
-
-    public async Task SafeSyncClusterState()
-    {
-        if(Interlocked.CompareExchange(ref _isSyncing, 1, 0) != 0)
+        if (Volatile.Read(ref _isInitialized))
             return;
+
+        if (Interlocked.CompareExchange(ref _isSyncing, 1, 0) != 0)
+            throw new RespClusterInitializationAlreadyInProgressException();
+
+        using Defer defer = new(() => _isSyncing = 0);
+
+        if (_options.SeedEndpoints.Length == 0)
+            throw new RespClusterInitializationFailedException(
+                [new InvalidOperationException("SeedEndpoints.Length == 0")]);
+
+        var (isSucceeded, exceptions) = await SyncClusterStateInternal(_options.SeedEndpoints);
+        if (!isSucceeded)
+            throw new RespClusterInitializationFailedException(exceptions);
+
+        _isInitialized = true;
+        if (Interlocked.CompareExchange(ref _syncTimerStarted, 1, 0) != 0)
+            return;
+
+        _ = Task.Run(SyncPeriodically);
+    }
+
+    private async Task SyncPeriodically()
+    {
+        using var repeatableTimer = new PeriodicTimer(_syncInterval);
+        while (await repeatableTimer.WaitForNextTickAsync(_cancellation.Token))
+            await SyncClusterState();
+    }
+
+    public async Task<(bool IsSucceeded, IReadOnlyList<Exception> Exceptions)> SyncClusterState()
+    {
+        if (Interlocked.CompareExchange(ref _isSyncing, 1, 0) != 0)
+            return (false, []);
+
+        if (_state is null)
+            throw new RespClusterNotInitializedException();
 
         using Defer _ = new(() => _isSyncing = 0);
 
         var endpoints = (_state?.Nodes.Select(n => n.Metadata.Address?.FormatEndpoint()) ?? [])
             .Concat(_options.SeedEndpoints).Where(e => !string.IsNullOrWhiteSpace(e));
 
-        await UpdateClusterState(endpoints!);
+        return await SyncClusterStateInternal(endpoints!);
+    }
+
+    private async Task<(bool IsSucceeded, IReadOnlyList<Exception> Exceptions)> SyncClusterStateInternal(IEnumerable<string> endpoints)
+    {
+        List<Exception>? exceptions = null;
+        var updated = false;
+        foreach (var seedEndpoint in endpoints.OrderBy(static _ => Random.Shared.Next()))
+        {
+            try
+            {
+                await UpdateClusterStateFromSeed(seedEndpoint);
+                updated = true;
+                break;
+            }
+            catch (Exception exception)
+            {
+                _options.ClusterRouterHandler?.OnFailedToRefreshClusterSateFromSeed(this, seedEndpoint, exception);
+                (exceptions ??= []).Add(exception);
+            }
+        }
+
+        if (updated && _state is { Nodes.Count: > 0 })
+        {
+            _ = Task.WhenAll(_state.Nodes.Select(n => n.Client.Connect()));
+            _options.ClusterRouterHandler?.OnClusterStateSynced(this, _state);
+
+            return (true, exceptions ?? []);
+        }
+
+        _options.ClusterRouterHandler?.OnFailedToSyncClusterState(this, exceptions ?? []);
+
+        return (false, exceptions ?? []);
     }
 
     private async Task UpdateClusterStateFromSeed(string seedEndpoint)
@@ -84,9 +146,18 @@ public sealed class ClusterRouter
             .Select(meta => new ClusterNode(
                         meta.Flags.Myself
                             ? client
-                            : currentState?.Nodes.FirstOrDefault(n => n.Id == meta.Id)?.Client ?? CreateClient(meta.Address!.FormatEndpoint()),
+                            : currentState?.Nodes.FirstOrDefault(n => n.Id == meta.Id)?.Client
+                              ?? CreateClient(meta.Address!.FormatEndpoint()),
                         meta))
             .ToArray();
+
+        foreach (var node in currentState?.Nodes ?? [])
+        {
+            if (activeClusterNodes.Any(n => n.Id == node.Id))
+                continue;
+
+            node.Client.Dispose();
+        }
 
         foreach (var clusterNode in activeClusterNodes)
             clusterNode.AssignReplicas(activeClusterNodes);
@@ -103,7 +174,7 @@ public sealed class ClusterRouter
         if (SlotMovedError.TryParse(exception, out var slotMovedError))
             state.Map.Update(slotMovedError);
 
-        _ = SafeSyncClusterState();
+        _ = SyncClusterState();
     }
 
     public override string ToString()
@@ -127,6 +198,15 @@ public sealed class ClusterRouter
         return stringBuilder.ToString();
     }
 
+    public void Dispose()
+    {
+        _isDisposed = true;
+        _cancellation.Cancel();
+
+        foreach (var node in _state?.Nodes ?? [])
+            node.Client.Dispose();
+    }
+
     private RespClient CreateClient(string seedEndpoint)
     {
         static async ValueTask InitializeReadonlyModeOnReplica(ConnectedSocket socket, CancellationToken cancellationToken)
@@ -148,16 +228,22 @@ public sealed class ClusterRouter
 
     public RespClient PickRandomPrimary()
     {
+        ObjectDisposedException.ThrowIf(_isDisposed, this);
+
         return RouteTo(RolePreference.Primary).PickRandomNode();
     }
 
     public RespClient PickRandom()
     {
+        ObjectDisposedException.ThrowIf(_isDisposed, this);
+
         return RouteTo(RolePreference.Any).PickRandomNode();
     }
 
     public RoleRouter RouteTo(RolePreference preference)
     {
+        ObjectDisposedException.ThrowIf(_isDisposed, this);
+
         switch (preference)
         {
             case RolePreference.Primary:

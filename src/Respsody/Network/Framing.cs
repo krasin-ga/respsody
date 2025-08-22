@@ -18,7 +18,7 @@ public abstract class Framing<T>: IDisposable
     private ReadyFrames<T>? _cs;
     private MemoryBlock _currentBlock;
     private Sequence<T> _currentSequence;
-    private bool _hasCurrentSequence = false;
+    private bool _hasCurrentSequence;
 
     private int _toSkip;
     private bool _disposed;

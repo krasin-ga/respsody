@@ -6,7 +6,7 @@ namespace Respsody.Benchmarks;
 
 public static class BenchmarkEnvironment
 {
-    private static GarnetServer _garnet = null!;
+    private static GarnetServer? _garnet;
     public static readonly IPEndPoint RespServerEndpoint = new(IPAddress.Loopback, 6399);
 
     public static void Cleanup()

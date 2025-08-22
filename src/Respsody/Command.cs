@@ -18,7 +18,7 @@ public sealed class Command<T> : IDisposable
     private bool _finalized;
     private int _length;
 
-    private int _owners = 0;
+    private int _owners;
     private bool _unsafe;
     public string? CommandName { get; private set; }
     public int Timeout { get; private set; } = int.MaxValue;

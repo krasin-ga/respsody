@@ -34,7 +34,7 @@ public class SequentialBenchmark
         _stackExchangeDb = ConnectionMultiplexer.Connect(new ConfigurationOptions { EndPoints = [endPoint] }).GetDatabase();
 
         _payloads = GetType().GetField(nameof(MessageSize))?.GetCustomAttribute<ParamsAttribute>()!
-            .Values.Select(v => (int)v!)!
+            .Values.Select(v => (int)v!)
             .ToFrozenDictionary(
                 k => k,
                 static v => (

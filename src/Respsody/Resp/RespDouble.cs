@@ -6,7 +6,7 @@ using Respsody.Memory;
 
 namespace Respsody.Resp;
 
-public readonly struct RespDouble : IDisposable, IRespResponse
+public readonly struct RespDouble : IRespResponse
 {
     private readonly Frame<RespContext> _frame;
 

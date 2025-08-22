@@ -1,5 +1,4 @@
-﻿using System;
-using System.Buffers;
+﻿using System.Buffers;
 using System.Runtime.InteropServices;
 using System.Text;
 using Respsody.Exceptions;
@@ -8,7 +7,6 @@ using Respsody.Memory;
 using Respsody.Resp;
 
 namespace Respsody;
-
 
 public readonly struct Value
 {
@@ -70,5 +68,4 @@ public readonly struct Value
     public static Value Utf8(string str) => new(str, Encoding.UTF8);
     public static Value Memory(ReadOnlyMemory<byte> memory) => new(memory);
     public static Value ByteArray(byte[] memory) => new(memory);
-
 }

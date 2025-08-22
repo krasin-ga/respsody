@@ -7,7 +7,7 @@ using Respsody.Memory;
 
 namespace Respsody.Resp;
 
-public readonly struct RespString : IDisposable, IRespResponse
+public readonly struct RespString : IRespResponse
 {
     private const int FormatLength = 3;
     private const int VerbatimOffset = FormatLength + 1;

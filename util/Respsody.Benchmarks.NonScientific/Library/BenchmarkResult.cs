@@ -85,7 +85,7 @@ public record BenchmarkResult(
     private static bool IsNumericType(Type type)
         => type == typeof(TimeSpan) || type == typeof(SizeInBytes) || type == typeof(int);
 
-    private static string FormatValue(object value)
+    private static string FormatValue(object? value)
     {
         if (value is TimeSpan ts)
             return FormatShort(ts);
