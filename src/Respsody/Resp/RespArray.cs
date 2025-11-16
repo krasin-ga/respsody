@@ -1,33 +1,16 @@
 ﻿using System.Runtime.CompilerServices;
+using Respsody.Client;
 using Respsody.Exceptions;
 using Respsody.Memory;
 
 namespace Respsody.Resp;
 
-public readonly struct RespArray(RespAggregate respAggregate) : IRespResponse
+public readonly struct RespArray(RespAggregate respAggregate, CompletionGuard completion) : IRespResponse
 {
     public int Length { get; } = respAggregate.Length - 1;
 
     public RespValueVariant this[int i] =>
         respAggregate[i + 1];
-
-    public static async ValueTask<RespArray> FromResponseTask(
-        ValueTask<RespResponse> responseTask)
-    {
-        var response = await responseTask;
-        try
-        {
-            if (response.Aggregate is not { } slicedRespAggregate)
-                throw new RespUnexpectedResponseException(ResponseType.Array, response);
-
-            return slicedRespAggregate.ToRespArray();
-        }
-        catch
-        {
-            response.Dispose();
-            throw;
-        }
-    }
 
     public T[] ToArrayOf<T>(IRespCodec codec)
     {
@@ -49,7 +32,8 @@ public readonly struct RespArray(RespAggregate respAggregate) : IRespResponse
 
     public void Dispose()
     {
-        respAggregate.Dispose();
+        if(completion.CanDispose()) 
+            respAggregate.Dispose();
     }
 
     public (T, IDisposable) AsExternallyOwnedUnsafe<T>()

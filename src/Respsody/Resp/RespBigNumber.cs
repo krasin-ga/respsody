@@ -1,7 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.CompilerServices;
-using Respsody.Exceptions;
+using Respsody.Client;
 using Respsody.Memory;
 
 namespace Respsody.Resp;
@@ -9,30 +9,14 @@ namespace Respsody.Resp;
 public readonly struct RespBigNumber : IRespResponse
 {
     private readonly Frame<RespContext> _frame;
+    private readonly CompletionGuard _guard;
 
-    public RespBigNumber(Frame<RespContext> frame)
+    public RespBigNumber(Frame<RespContext> frame, CompletionGuard guard)
     {
         Debug.Assert(CanConvert(frame));
 
         _frame = frame;
-    }
-
-    public static async ValueTask<RespBigNumber> FromResponseTask(
-        ValueTask<RespResponse> responseTask)
-    {
-        var response = await responseTask;
-        try
-        {
-            if (response.Frame is not { } sliceMemory)
-                throw new RespUnexpectedResponseException(ResponseType.BigNumber, response);
-
-            return sliceMemory.ToRespBigNumber();
-        }
-        catch
-        {
-            response.Dispose();
-            throw;
-        }
+        _guard = guard;
     }
 
     public BigInteger ToBigInteger()
@@ -60,14 +44,15 @@ public readonly struct RespBigNumber : IRespResponse
 
     public void Dispose()
     {
-        _frame.Dispose();
+        if(_guard.CanDispose())
+            _frame.Dispose();
     }
 
     public (T, IDisposable) AsExternallyOwnedUnsafe<T>()
         where T : IRespResponse
     {
         var (frame, lifetime) = _frame.AsExternallyOwned();
-        var cloned = new RespBigNumber(frame);
+        var cloned = new RespBigNumber(frame, CompletionGuard.Restrictive);
         return (Unsafe.As<RespBigNumber, T>(ref cloned), lifetime);
     }
 

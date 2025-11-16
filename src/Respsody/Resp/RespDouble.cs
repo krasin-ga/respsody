@@ -1,7 +1,7 @@
 ﻿using System.Buffers.Text;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
-using Respsody.Exceptions;
+using Respsody.Client;
 using Respsody.Memory;
 
 namespace Respsody.Resp;
@@ -9,33 +9,15 @@ namespace Respsody.Resp;
 public readonly struct RespDouble : IRespResponse
 {
     private readonly Frame<RespContext> _frame;
+    private readonly CompletionGuard _guard;
 
-    public RespDouble(Frame<RespContext> frame)
+    public RespDouble(Frame<RespContext> frame, CompletionGuard guard)
     {
         Debug.Assert(CanConvert(frame));
 
         _frame = frame;
+        _guard = guard;
     }
-
-    public static async ValueTask<RespDouble> FromResponseTask(
-        ValueTask<RespResponse> responseTask)
-    {
-        var response = await responseTask;
-        try
-        {
-            if (response.Frame is not { } sliceMemory)
-                throw new RespUnexpectedResponseException(ResponseType.Double, response);
-
-            return sliceMemory.ToRespDouble();
-        }
-        catch
-        {
-            response.Dispose();
-            throw;
-        }
-    }
-
-
     public double ToDouble()
     {
         var span = _frame.Span[1..^2];
@@ -85,14 +67,15 @@ public readonly struct RespDouble : IRespResponse
 
     public void Dispose()
     {
-        _frame.Dispose();
+        if(_guard.CanDispose())
+            _frame.Dispose();
     }
 
     public (T, IDisposable) AsExternallyOwnedUnsafe<T>()
         where T : IRespResponse
     {
         var (frame, lifetime) = _frame.AsExternallyOwned();
-        var cloned = new RespDouble(frame);
+        var cloned = new RespDouble(frame, CompletionGuard.Restrictive);
         return (Unsafe.As<RespDouble, T>(ref cloned), lifetime);
     }
 

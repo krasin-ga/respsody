@@ -76,8 +76,8 @@ public class Tests(IDatabaseAsync db, IRespClient client)
         foreach (var (key, value) in seValues)
         {
             await db.StringSetAsync(key, value);
-            var res = await db.StringGetAsync(key);
-            j += JsonSerializer.Deserialize<SampleJson>(res!)!.VectorValue.Length;
+            var res = (ReadOnlyMemory<byte>)await db.StringGetAsync(key);
+            j += JsonSerializer.Deserialize<SampleJson>(res.Span)!.VectorValue.Length;
         }
 
         return (int)j;
@@ -158,7 +158,8 @@ public class Tests(IDatabaseAsync db, IRespClient client)
                                async v =>
                                {
                                    await db.StringSetAsync(v.Key, v.Value);
-                                   j2 += JsonSerializer.Deserialize<SampleJson>((await db.StringGetAsync(v.Key))!)!.VectorValue.Length;
+                                   var stringGetAsync = (ReadOnlyMemory<byte>) await db.StringGetAsync(v.Key);
+                                   j2 += JsonSerializer.Deserialize<SampleJson>(stringGetAsync.Span)!.VectorValue.Length;
                                })))
         {
             j++;

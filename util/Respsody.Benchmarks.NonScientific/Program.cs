@@ -2,6 +2,7 @@
 using System.Net;
 using System.Runtime;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using Garnet;
@@ -17,24 +18,25 @@ using Respsody.Client.Options;
 using StackExchange.Redis;
 
 // ReSharper disable All
-
 ThreadPool.SetMaxThreads(Environment.ProcessorCount, Environment.ProcessorCount);
+
+Console.WriteLine(RuntimeInformation.FrameworkDescription);
 
 var ipEndPoint = new IPEndPoint(IPAddress.Loopback, 6379);
 
-//using var garnet = new GarnetServer(
-//    new GarnetServerOptions
-//    {
-//        EndPoints = [ipEndPoint],
-//        logger = new ConsoleLoggerProvider(
-//                new OptionsMonitor<ConsoleLoggerOptions>(
-//                    new OptionsFactory<ConsoleLoggerOptions>([], []),
-//                    [],
-//                    new OptionsCache<ConsoleLoggerOptions>()))
-//            .CreateLogger("garnet")
-//    });
-
-//garnet.Start();
+// using var garnet = new GarnetServer(
+//     new GarnetServerOptions
+//     {
+//         EndPoints = [ipEndPoint],
+//         logger = new ConsoleLoggerProvider(
+//                 new OptionsMonitor<ConsoleLoggerOptions>(
+//                     new OptionsFactory<ConsoleLoggerOptions>([], []),
+//                     [],
+//                     new OptionsCache<ConsoleLoggerOptions>()))
+//             .CreateLogger("garnet")
+//     });
+//
+// garnet.Start();
 
 var rnd = new Random(42);
 var large_300 = Enumerable.Range(0, 1024 * 1024).OrderBy(s => rnd.Next()).Take(300)
@@ -73,7 +75,7 @@ var db = (await ConnectionMultiplexer.ConnectAsync(new ConfigurationOptions()
 
 var tests = new Tests(db, client);
 
-var iters = 50;
+var iters = 5;
 BenchmarkResult[] results =
 [
     await RunTest(tests.SetGet_Sequential, Target.Respsody, small_20K, iterations: iters),

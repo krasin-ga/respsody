@@ -1,8 +1,9 @@
-﻿using Respsody.Memory;
+﻿using Respsody.Client;
+using Respsody.Memory;
 
 namespace Respsody.Resp;
 
-public readonly struct RespPush(RespAggregate respAggregate) : IDisposable
+public readonly struct RespPush(RespAggregate respAggregate, CompletionGuard guard) : IDisposable
 {
     public int Length { get; } = respAggregate.Length - 1;
 
@@ -29,7 +30,8 @@ public readonly struct RespPush(RespAggregate respAggregate) : IDisposable
 
     public void Dispose()
     {
-        respAggregate.Dispose();
+        if(guard.CanDispose())
+            respAggregate.Dispose();
     }
 
     public static bool CanConvert(Frame<RespContext> frame)

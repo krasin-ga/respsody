@@ -216,7 +216,7 @@ public sealed class ClusterRouter : IDisposable
                 return;
 
             using var directSocketRpc = new DirectSocketRpc(socket.Socket);
-            await directSocketRpc.Rpc("READONLY", _ => { }, cancellationToken);
+            using var ro = await directSocketRpc.Rpc("READONLY", _ => { }, cancellationToken);
         }
 
         return new RespClient(

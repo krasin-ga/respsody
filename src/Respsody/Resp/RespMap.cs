@@ -1,30 +1,12 @@
 ﻿using System.Runtime.CompilerServices;
-using Respsody.Exceptions;
+using Respsody.Client;
 using Respsody.Memory;
 
 namespace Respsody.Resp;
 
-public readonly struct RespMap(RespAggregate respAggregate) : IRespResponse
+public readonly struct RespMap(RespAggregate respAggregate, CompletionGuard guard) : IRespResponse
 {
     public int Length { get; } = (respAggregate.Length - 1) / 2;
-
-    public static async ValueTask<RespMap> FromResponseTask(
-        ValueTask<RespResponse> responseTask)
-    {
-        var response = await responseTask;
-        try
-        {
-            if (response.Aggregate is not { } slicedRespAggregate)
-                throw new RespUnexpectedResponseException(ResponseType.Map, response);
-
-            return slicedRespAggregate.ToRespMap();
-        }
-        catch
-        {
-            response.Dispose();
-            throw;
-        }
-    }
 
     public IReadOnlyDictionary<TKey, object?> ToMapOf<TKey>(DecodeSlice<TKey> decode)
         where TKey : notnull
@@ -47,12 +29,13 @@ public readonly struct RespMap(RespAggregate respAggregate) : IRespResponse
     {
         return ToMapOf(
             static (in Frame<RespContext> slice)
-                => slice.ToRespString().ToString()!);
+                => slice.ToRespStringView().ToString()!);
     }
 
     public void Dispose()
     {
-        respAggregate.Dispose();
+        if(guard.CanDispose()) 
+            respAggregate.Dispose();
     }
 
     public (T, IDisposable) AsExternallyOwnedUnsafe<T>()

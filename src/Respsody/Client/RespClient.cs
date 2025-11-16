@@ -237,8 +237,7 @@ public sealed class RespClient(
 
         if (aggregate.HeaderFrame.Context.Type == RespType.Push)
         {
-            var respPush = new RespPush(aggregate);
-            if (respPush.TryGetSubscription(out var data))
+            if (aggregate.ToRespPushView().TryGetSubscription(out var data))
             {
                 var idx = 0;
                 foreach (var confirmation in _subUnSubConfirmationsQueue)
@@ -255,11 +254,12 @@ public sealed class RespClient(
 
                     idx++;
                 }
-
+                
+                aggregate.Dispose();
                 return;
             }
 
-            _pushReceiver.Receive(respPush);
+            _pushReceiver.Receive(new RespPush(aggregate, new CompletionGuard()));
             return;
         }
 
@@ -274,7 +274,7 @@ public sealed class RespClient(
 
     private void HandleSimpleResponse(Frame<RespContext> frame, int ticks)
     {
-        if (!_responseQueue.TryDequeue(out var requestData))
+        if (!_responseQueue.TryDequeue(out var payload))
             Panic("[handle simple response] failed to dequeue response for completion");
 
         var attribute = _attribute;
@@ -282,13 +282,13 @@ public sealed class RespClient(
 
         if (frame.Context.Type is RespType.BulkError or RespType.SimpleError)
         {
-            using var errorString = new RespString(frame);
+            using var errorString = new RespString(frame, payload.Guard);
             var exception = new RespErrorResponseException(errorString.ToString(Encoding.UTF8) ?? "NULL");
-            requestData.CompleteWithException(exception, ticks);
+            payload.CompleteWithException(exception, ticks);
             return;
         }
 
-        requestData.Complete(new RespResponse(Frame: frame, null, attribute), ticks);
+        payload.Complete(new RespResponse(Frame: frame, null, attribute), ticks);
     }
 
     public void OnDisconnected(Exception? exception, int generation)
@@ -371,7 +371,8 @@ public sealed class RespClient(
         : IPayload
     {
         public int ConnectionGeneration { get; private set; }
-        private readonly CompletionToken _ct = new();
+        public CompletionGuard Guard => _ct;
+        private readonly CompletionGuard _ct = new();
 
         public bool OnAboutToWrite(int socketId, int ticks)
         {
@@ -519,7 +520,7 @@ public sealed class RespClient(
                 return;
             }
 
-            taskCompletionSource.SetResult(new RespSet(aggregate));
+            taskCompletionSource.SetResult(new RespSet(aggregate, _ct));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -531,7 +532,7 @@ public sealed class RespClient(
                 return;
             }
 
-            taskCompletionSource.SetResult(new RespArray(aggregate));
+            taskCompletionSource.SetResult(new RespArray(aggregate, _ct));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -543,7 +544,7 @@ public sealed class RespClient(
                 return;
             }
 
-            taskCompletionSource.SetResult(new RespMap(aggregate));
+            taskCompletionSource.SetResult(new RespMap(aggregate, _ct));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -555,7 +556,7 @@ public sealed class RespClient(
                 return;
             }
 
-            taskCompletionSource.SetResult(new RespString(sliceMemory));
+            taskCompletionSource.SetResult(new RespString(sliceMemory, _ct));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -567,7 +568,7 @@ public sealed class RespClient(
                 return;
             }
 
-            taskCompletionSource.SetResult(new RespNumber(sliceMemory));
+            taskCompletionSource.SetResult(new RespNumber(sliceMemory, _ct));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -579,7 +580,7 @@ public sealed class RespClient(
                 return;
             }
 
-            taskCompletionSource.SetResult(new RespBigNumber(sliceMemory));
+            taskCompletionSource.SetResult(new RespBigNumber(sliceMemory, _ct));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -591,7 +592,7 @@ public sealed class RespClient(
                 return;
             }
 
-            taskCompletionSource.SetResult(new RespDouble(sliceMemory));
+            taskCompletionSource.SetResult(new RespDouble(sliceMemory, _ct));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -603,7 +604,7 @@ public sealed class RespClient(
                 return;
             }
 
-            taskCompletionSource.SetResult(new RespBoolean(sliceMemory));
+            taskCompletionSource.SetResult(new RespBoolean(sliceMemory, _ct));
         }
 
         internal bool IsSubscription(string cmd, Bytes[] acks)
@@ -619,7 +620,7 @@ public sealed class RespClient(
         Bytes[] acks,
         int connectionGeneration,
         ITaskCompletionSource taskCompletionSource,
-        CompletionToken ct)
+        CompletionGuard ct)
     {
         public enum HandleResult
         {
@@ -657,16 +658,6 @@ public sealed class RespClient(
         {
             if (ct.CanComplete())
                 taskCompletionSource.SetException(exception);
-        }
-    }
-
-    private class CompletionToken
-    {
-        private int _isCompleted;
-
-        public bool CanComplete()
-        {
-            return Interlocked.CompareExchange(ref _isCompleted, 1, 0) == 0;
         }
     }
 }
