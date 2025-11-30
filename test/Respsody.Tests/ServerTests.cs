@@ -81,10 +81,10 @@ public class ServerTests(GarnetFixture fixture, ITestOutputHelper @out) : IClass
                 Handler = new TestHandler(
                     output: @out,
                     onConnected: (_, _) =>
-                                 {
-                                     wasConnected = true;
-                                     return ValueTask.CompletedTask;
-                                 },
+                    {
+                        wasConnected = true;
+                        return ValueTask.CompletedTask;
+                    },
                     onDisconnected: (_, _, gen) => wasDisconnected = gen > 0)
             },
             new DefaultConnectionProcedure(new ConnectionOptions { Endpoint = garnet.EndPoint.ToString() }));

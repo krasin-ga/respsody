@@ -14,7 +14,6 @@ public static class RespTypesExtensions
         return new RespString(simple, CompletionGuard.Restrictive);
     }
 
-
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static RespString ToRespStringView(this in Frame<RespContext> frame)
     {

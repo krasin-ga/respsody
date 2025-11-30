@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Threading;
 using System.Threading.Tasks;
 using Respsody.Client;
 using Xunit.Abstractions;
@@ -17,7 +18,8 @@ public class TestHandler(
     Action<IRespClient, int, string>? onCommandExecuted = null,
     Action<IRespClient, int, string>? onCommandFailed = null,
     Action<IRespClient, int, string>? onCommandTimedOut = null,
-    Action<IRespClient, int, string>? onCommandCancelled = null
+    Action<IRespClient, int, string>? onCommandCancelled = null,
+    bool logCommandExecuted = true
 ) : IRespClientHandler
 {
     private void Log(string message)
@@ -58,7 +60,7 @@ public class TestHandler(
 
     public void OnMemoryBlockCreated(int blockSize)
     {
-        Log($"[MemCreated]  {blockSize} bytes");
+        Log($"[MemCreated]  {blockSize} bytes | ThreadCount={ThreadPool.ThreadCount}");
         onMemoryBlockCreated?.Invoke(blockSize);
     }
 
@@ -76,7 +78,8 @@ public class TestHandler(
 
     public void OnCommandExecuted(IRespClient client, int elapsedTimeInMs, string command)
     {
-        Log($"[CmdExecuted] {command} ({elapsedTimeInMs} ms)");
+        if(logCommandExecuted)
+            Log($"[CmdExecuted] {command} ({elapsedTimeInMs} ms)");
         onCommandExecuted?.Invoke(client, elapsedTimeInMs, command);
     }
 

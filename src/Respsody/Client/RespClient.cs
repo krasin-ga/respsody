@@ -254,7 +254,7 @@ public sealed class RespClient(
 
                     idx++;
                 }
-                
+
                 aggregate.Dispose();
                 return;
             }
@@ -269,7 +269,7 @@ public sealed class RespClient(
         var attribute = _attribute;
         _attribute = null;
 
-        payload.Complete(new RespResponse(Frame: null, aggregate, attribute), ticks);
+        payload.Complete(aggregate, ticks, attribute);
     }
 
     private void HandleSimpleResponse(Frame<RespContext> frame, int ticks)
@@ -288,7 +288,7 @@ public sealed class RespClient(
             return;
         }
 
-        payload.Complete(new RespResponse(Frame: frame, null, attribute), ticks);
+        payload.Complete(frame, ticks, attribute);
     }
 
     public void OnDisconnected(Exception? exception, int generation)
@@ -466,7 +466,7 @@ public sealed class RespClient(
             taskCompletionSource.SetException(exception);
         }
 
-        public void Complete(RespResponse response, int ticks)
+        public void Complete(RespAggregate aggregate, int ticks, RespAggregate? attribute)
         {
             if (_ct?.CanComplete() is false)
                 return;
@@ -476,35 +476,94 @@ public sealed class RespClient(
             switch (responseType)
             {
                 case ResponseType.String:
-                    CompleteStringResponse(response);
-                    break;
                 case ResponseType.Boolean:
-                    CompleteBooleanResponse(response);
-                    break;
                 case ResponseType.Double:
-                    CompleteDoubleResponse(response);
-                    break;
                 case ResponseType.Number:
-                    CompleteNumberResponse(response);
-                    break;
                 case ResponseType.BigNumber:
-                    CompleteBigNumberResponse(response);
+                    taskCompletionSource.SetException(new RespUnexpectedResponseException(responseType, aggregate));
+                    aggregate.Dispose();
+                    attribute?.Dispose();
                     break;
                 case ResponseType.Array:
-                    CompleteArrayResponse(response);
+                    CompleteArrayResponse(aggregate);
+                    attribute?.Dispose();
                     break;
                 case ResponseType.Map:
-                    CompleteMapResponse(response);
+                    CompleteMapResponse(aggregate);
+                    attribute?.Dispose();
                     break;
                 case ResponseType.Set:
-                    CompleteSetResponse(response);
+                    CompleteSetResponse(aggregate);
+                    attribute?.Dispose();
                     break;
                 case ResponseType.Untyped:
-                    taskCompletionSource.SetResult(response);
+                    taskCompletionSource.SetResult(
+                        new RespResponse(
+                            frame: null,
+                            aggregate: aggregate,
+                            attribute: attribute,
+                            guard: Guard
+                        ));
                     break;
                 case ResponseType.Void:
                     taskCompletionSource.SetResult(new RespVoid());
-                    response.Dispose();
+                    aggregate.Dispose();
+                    attribute?.Dispose();
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException();
+            }
+        }
+
+        public void Complete(Frame<RespContext> frame, int ticks, RespAggregate? attribute)
+        {
+            if (_ct?.CanComplete() is false)
+                return;
+
+            respClient._clientHandler?.OnCommandExecuted(respClient, ticks - startTicks, command);
+
+            switch (responseType)
+            {
+                case ResponseType.String:
+                    CompleteStringResponse(frame);
+                    attribute?.Dispose();
+                    break;
+                case ResponseType.Boolean:
+                    CompleteBooleanResponse(frame);
+                    attribute?.Dispose();
+                    break;
+                case ResponseType.Double:
+                    CompleteDoubleResponse(frame);
+                    attribute?.Dispose();
+                    break;
+                case ResponseType.Number:
+                    CompleteNumberResponse(frame);
+                    attribute?.Dispose();
+                    break;
+                case ResponseType.BigNumber:
+                    CompleteBigNumberResponse(frame);
+                    attribute?.Dispose();
+                    break;
+                case ResponseType.Array:
+                case ResponseType.Map:
+                case ResponseType.Set:
+                    taskCompletionSource.SetException(new RespUnexpectedResponseException(responseType, frame));
+                    frame.Dispose();
+                    attribute?.Dispose();
+                    break;
+                case ResponseType.Untyped:
+                    taskCompletionSource.SetResult(
+                        new RespResponse(
+                            frame: frame,
+                            aggregate: null,
+                            attribute: attribute,
+                            guard: Guard
+                        ));
+                    break;
+                case ResponseType.Void:
+                    taskCompletionSource.SetResult(new RespVoid());
+                    frame.Dispose();
+                    attribute?.Dispose();
                     break;
                 default:
                     throw new ArgumentOutOfRangeException();
@@ -512,11 +571,12 @@ public sealed class RespClient(
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void CompleteSetResponse(RespResponse response)
+        private void CompleteSetResponse(RespAggregate aggregate)
         {
-            if (response.Aggregate is not { } aggregate || !RespSet.CanConvert(aggregate.HeaderFrame))
+            if (!RespSet.CanConvert(aggregate.HeaderFrame))
             {
-                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.Set, response));
+                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.Set, aggregate));
+                aggregate.Dispose();
                 return;
             }
 
@@ -524,11 +584,12 @@ public sealed class RespClient(
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void CompleteArrayResponse(RespResponse response)
+        private void CompleteArrayResponse(RespAggregate aggregate)
         {
-            if (response.Aggregate is not { } aggregate || !RespArray.CanConvert(aggregate.HeaderFrame))
+            if (!RespArray.CanConvert(aggregate.HeaderFrame))
             {
-                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.Array, response));
+                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.Array, aggregate));
+                aggregate.Dispose();
                 return;
             }
 
@@ -536,11 +597,12 @@ public sealed class RespClient(
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void CompleteMapResponse(RespResponse response)
+        private void CompleteMapResponse(RespAggregate aggregate)
         {
-            if (response.Aggregate is not { } aggregate || !RespMap.CanConvert(aggregate.HeaderFrame))
+            if (!RespMap.CanConvert(aggregate.HeaderFrame))
             {
-                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.Map, response));
+                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.Map, aggregate));
+                aggregate.Dispose();
                 return;
             }
 
@@ -548,63 +610,68 @@ public sealed class RespClient(
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void CompleteStringResponse(RespResponse response)
+        private void CompleteStringResponse(Frame<RespContext> frame)
         {
-            if (response.Frame is not { } sliceMemory || !RespString.CanConvert(sliceMemory))
+            if (!RespString.CanConvert(frame))
             {
-                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.String, response));
+                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.String, frame));
+                frame.Dispose();
                 return;
             }
 
-            taskCompletionSource.SetResult(new RespString(sliceMemory, _ct));
+            taskCompletionSource.SetResult(new RespString(frame, _ct));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void CompleteNumberResponse(RespResponse response)
+        private void CompleteNumberResponse(Frame<RespContext> frame)
         {
-            if (response.Frame is not { } sliceMemory || !RespNumber.CanConvert(sliceMemory))
+            if (!RespNumber.CanConvert(frame))
             {
-                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.Number, response));
+                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.Number, frame));
+                frame.Dispose();
                 return;
             }
 
-            taskCompletionSource.SetResult(new RespNumber(sliceMemory, _ct));
+            taskCompletionSource.SetResult(new RespNumber(frame, _ct));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void CompleteBigNumberResponse(RespResponse response)
+        private void CompleteBigNumberResponse(Frame<RespContext> frame)
         {
-            if (response.Frame is not { } sliceMemory || !RespBigNumber.CanConvert(sliceMemory))
+            if (!RespBigNumber.CanConvert(frame))
             {
-                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.BigNumber, response));
+                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.BigNumber, frame));
+                frame.Dispose();
                 return;
             }
 
-            taskCompletionSource.SetResult(new RespBigNumber(sliceMemory, _ct));
+            taskCompletionSource.SetResult(new RespBigNumber(frame, _ct));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void CompleteDoubleResponse(RespResponse response)
+        private void CompleteDoubleResponse(Frame<RespContext> frame)
         {
-            if (response.Frame is not { } sliceMemory || !RespDouble.CanConvert(sliceMemory))
+            if (!RespDouble.CanConvert(frame))
             {
-                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.Double, response));
+                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.Double, frame));
+                frame.Dispose();
                 return;
             }
 
-            taskCompletionSource.SetResult(new RespDouble(sliceMemory, _ct));
+            taskCompletionSource.SetResult(new RespDouble(frame, _ct));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void CompleteBooleanResponse(RespResponse response)
+        private void CompleteBooleanResponse(Frame<RespContext> frame)
         {
-            if (response.Frame is not { } sliceMemory || !RespBoolean.CanConvert(sliceMemory))
+            if (!RespBoolean.CanConvert(frame))
             {
-                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.Boolean, response));
+                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.Boolean, frame));
+                frame.Dispose();
                 return;
             }
 
-            taskCompletionSource.SetResult(new RespBoolean(sliceMemory, _ct));
+            taskCompletionSource.SetResult(new RespBoolean(frame, _ct));
         }
 
         internal bool IsSubscription(string cmd, Bytes[] acks)

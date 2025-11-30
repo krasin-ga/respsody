@@ -56,6 +56,7 @@ public class DefaultConnectionProcedure(ConnectionOptions connectionOptions)
             },
             cts.Token);
 
-        return new ConnectedSocket(socket, new ConnectionMetadata(endPoint, helloReply.ToRespMapView().ToMapWithStringKey()));
+        var metadata = helloReply.ToRespMapView().ToMapWithStringKey();
+        return new ConnectedSocket(socket, new ConnectionMetadata(endPoint, metadata));
     }
 }

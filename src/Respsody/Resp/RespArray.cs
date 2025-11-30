@@ -1,6 +1,6 @@
-﻿using System.Runtime.CompilerServices;
+﻿using System.Collections;
+using System.Runtime.CompilerServices;
 using Respsody.Client;
-using Respsody.Exceptions;
 using Respsody.Memory;
 
 namespace Respsody.Resp;
@@ -9,8 +9,24 @@ public readonly struct RespArray(RespAggregate respAggregate, CompletionGuard co
 {
     public int Length { get; } = respAggregate.Length - 1;
 
-    public RespValueVariant this[int i] =>
-        respAggregate[i + 1];
+    private RespValueVariant this[int i] => respAggregate[i + 1];
+
+    public Enumerator<RespString> EnumerateStrings()
+    {
+        return new Enumerator<RespString>(respAggregate, variant => variant.ToRespStringView());
+    }
+
+    public Enumerator<T> Enumerate<T>(Func<RespValueVariant, T> convert)
+        where T : IRespResponse
+    {
+        return new Enumerator<T>(respAggregate, convert);
+    }
+
+    public T ElementAt<T>(int i, Func<RespValueVariant, T> convert)
+        where T : IRespResponse
+    {
+        return convert(this[i]);
+    }
 
     public T[] ToArrayOf<T>(IRespCodec codec)
     {
@@ -32,7 +48,7 @@ public readonly struct RespArray(RespAggregate respAggregate, CompletionGuard co
 
     public void Dispose()
     {
-        if(completion.CanDispose()) 
+        if (completion.CanDispose())
             respAggregate.Dispose();
     }
 
@@ -47,5 +63,34 @@ public readonly struct RespArray(RespAggregate respAggregate, CompletionGuard co
     public static bool CanConvert(Frame<RespContext> frame)
     {
         return frame.GetRespType() is RespType.Array;
+    }
+
+    public struct Enumerator<T>(RespAggregate data, Func<RespValueVariant, T> convert) : IEnumerator<T>
+    {
+        private int _index = -1;
+        private T _current = default!;
+
+        public bool MoveNext()
+        {
+            if (++_index >= data.Length)
+                return false;
+
+            _current = convert(data[_index]);
+            return true;
+        }
+
+        public readonly T Current => _current;
+
+        readonly object IEnumerator.Current => Current!;
+
+        public void Reset()
+        {
+            _index = -1;
+            _current = default!;
+        }
+
+        public readonly void Dispose()
+        {
+        }
     }
 }

@@ -1,11 +1,12 @@
 ﻿using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 
 namespace Respsody.Memory;
 
-public class StandardMemoryBlocksPool : IMemoryBlocksPool
+public class StandardMemoryBlocksPool(int perPoolBlocksLimit = 32) : IMemoryBlocksPool
 {
-    private readonly ConcurrentStack<MemoryBlock>[] _pools = [.. A000079.Select(_ => new ConcurrentStack<MemoryBlock>())];
+    private readonly InnerPool[] _pools = [.. A000079.Select(_ => new InnerPool(perPoolBlocksLimit))];
 
     private static int[] A000079 =>
     [
@@ -15,8 +16,8 @@ public class StandardMemoryBlocksPool : IMemoryBlocksPool
 
     public (MemoryBlock Block, bool IsNewlyCreated) Lease(int blockSize)
     {
-        var stack = GetPool(blockSize);
-        if (stack.TryPop(out var block))
+        var pool = GetPool(blockSize);
+        if (pool.TryPop(out var block))
         {
             return (block, IsNewlyCreated: false);
         }
@@ -26,7 +27,7 @@ public class StandardMemoryBlocksPool : IMemoryBlocksPool
         return (block, IsNewlyCreated: true);
     }
 
-    private ConcurrentStack<MemoryBlock> GetPool(int blockSize)
+    private InnerPool GetPool(int blockSize)
     {
         const int minBlockSizeIdx = 7; // 64 bytes
         var index = BitOperations.RoundUpToPowerOf2((uint)blockSize) switch
@@ -69,6 +70,33 @@ public class StandardMemoryBlocksPool : IMemoryBlocksPool
 
     public void Return(MemoryBlock memoryBlock)
     {
-        GetPool(memoryBlock.Size).Push(memoryBlock);
+        var pool = GetPool(memoryBlock.Size);
+        pool.TryPush(memoryBlock);
+    }
+
+    private class InnerPool(int limit)
+    {
+        private readonly ConcurrentStack<MemoryBlock> _stack = [];
+        private int _currentCount;
+
+        public bool TryPop([NotNullWhen(true)] out MemoryBlock? o)
+        {
+            if (!_stack.TryPop(out o))
+                return false;
+
+            Interlocked.Decrement(ref _currentCount);
+            return true;
+        }
+
+        public void TryPush(MemoryBlock memoryBlock)
+        {
+            if (Interlocked.Increment(ref _currentCount) > limit)
+            {
+                Interlocked.Decrement(ref _currentCount);
+                return;
+            }
+
+            _stack.Push(memoryBlock);
+        }
     }
 }

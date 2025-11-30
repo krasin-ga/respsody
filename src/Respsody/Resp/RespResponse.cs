@@ -1,26 +1,38 @@
 ﻿using System.Runtime.CompilerServices;
+using Respsody.Client;
 using Respsody.Library.Disposables;
 using Respsody.Memory;
 
 namespace Respsody.Resp;
 
-public readonly record struct RespResponse(
-    Frame<RespContext>? Frame,
-    RespAggregate? Aggregate,
-    RespAggregate? Attribute)
+public readonly struct RespResponse(
+    Frame<RespContext>? frame,
+    RespAggregate? aggregate,
+    RespAggregate? attribute,
+    CompletionGuard guard)
     : IRespResponse
 {
+    public RespValueVariant? Variant { get; } = frame.HasValue
+        ? new RespValueVariant(frame.Value)
+        : aggregate is { }
+            ? new RespValueVariant(aggregate)
+            : null;
+
+    public RespAggregate? Attribute { get; } = attribute;
+
     public void Dispose()
     {
-        Frame?.Dispose();
-        Aggregate?.Dispose();
+        if (!guard.CanDispose())
+            return;
+
+        Variant?.Dispose();
         Attribute?.Dispose();
     }
 
     public (T, IDisposable Liftime) AsExternallyOwnedUnsafe<T>() where T : IRespResponse
     {
         var disposable = new CompositeDisposable();
-        var frame = Frame;
+        var frame = Variant?.Simple;
         if (frame.HasValue)
         {
             var (ownedFrame, lifetime) = frame.Value.AsExternallyOwned();
@@ -28,24 +40,21 @@ public readonly record struct RespResponse(
             frame = ownedFrame;
         }
 
-        if (Aggregate is { })
-            disposable.Add(Aggregate.AsExternallyOwned());
+        if (Variant?.Aggregate is { } agg)
+            disposable.Add(agg.AsExternallyOwned());
 
         if (Attribute is { })
             disposable.Add(Attribute.AsExternallyOwned());
 
-        var ownedResponse = this with { Frame = frame };
+        var ownedResponse = new RespResponse(frame, Variant?.Aggregate, Attribute, guard);
 
         return (Unsafe.As<RespResponse, T>(ref ownedResponse), disposable);
     }
 
     public string ToDebugString()
     {
-        if (Frame is { } frame)
-            return frame.ToDebugString();
-
-        if (Aggregate is { } agg)
-            return agg.ToDebugString();
+        if (Variant is { } variant)
+            return variant.ToDebugString();
 
         if (Attribute is { } att)
             return att.ToDebugString();
