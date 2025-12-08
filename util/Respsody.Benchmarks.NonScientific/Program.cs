@@ -75,7 +75,7 @@ var db = (await ConnectionMultiplexer.ConnectAsync(new ConfigurationOptions()
 
 var tests = new Tests(db, client);
 
-var iters = 5;
+var iters = 50;
 BenchmarkResult[] results =
 [
     await RunTest(tests.SetGet_Sequential, Target.Respsody, small_20K, iterations: iters),

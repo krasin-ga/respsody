@@ -8,9 +8,9 @@ namespace Respsody.Resp;
 public readonly struct RespNumber : IRespResponse
 {
     private readonly Frame<RespContext> _frame;
-    private readonly CompletionGuard _guard;
+    private readonly DisposalGuard _guard;
 
-    public RespNumber(Frame<RespContext> frame, CompletionGuard guard)
+    public RespNumber(Frame<RespContext> frame, DisposalGuard guard)
     {
         Debug.Assert(CanConvert(frame));
 
@@ -20,6 +20,8 @@ public readonly struct RespNumber : IRespResponse
 
     public long ToInt64()
     {
+        _guard.CheckDisposed();
+
         var span = _frame.Span[1..^2];
 
         var sign = 1;
@@ -43,7 +45,7 @@ public readonly struct RespNumber : IRespResponse
 
     public void Dispose()
     {
-        if(_guard.CanDispose())
+        if(_guard.TryDispose())
             _frame.Dispose();
     }
 
@@ -51,7 +53,7 @@ public readonly struct RespNumber : IRespResponse
         where T : IRespResponse
     {
         var (frame, lifetime) = _frame.AsExternallyOwned();
-        var cloned = new RespNumber(frame, CompletionGuard.Restrictive);
+        var cloned = new RespNumber(frame, _guard.ToCheckOnly());
         return (Unsafe.As<RespNumber, T>(ref cloned), lifetime);
     }
     public static bool CanConvert(in Frame<RespContext> frame)

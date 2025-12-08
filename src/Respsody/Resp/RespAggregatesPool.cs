@@ -22,7 +22,7 @@ public sealed class RespAggregatesPool
 
     public void Return(RespAggregate aggregate)
     {
-       _queue.Enqueue(aggregate);
-       aggregate.ReturnedToPool();
+        aggregate.ReturnedToPool();
+        _queue.Enqueue(aggregate);
     }
 }

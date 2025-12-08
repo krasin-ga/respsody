@@ -8,16 +8,15 @@ namespace Respsody.Resp;
 public readonly struct RespBoolean : IRespResponse
 {
     private readonly Frame<RespContext> _frame;
-    private readonly CompletionGuard _guard;
+    private readonly DisposalGuard _guard;
 
-    public RespBoolean(Frame<RespContext> frame, CompletionGuard guard)
+    public RespBoolean(Frame<RespContext> frame, DisposalGuard guard)
     {
         Debug.Assert(frame.GetRespType() is RespType.Boolean);
 
         _frame = frame;
         _guard = guard;
     }
-
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool CanConvert(Frame<RespContext> frame)
@@ -29,7 +28,7 @@ public readonly struct RespBoolean : IRespResponse
         where T : IRespResponse
     {
         var (frame, lifetime) = _frame.AsExternallyOwned();
-        var cloned = new RespBoolean(frame, CompletionGuard.Restrictive);
+        var cloned = new RespBoolean(frame, _guard.ToCheckOnly());
         return (Unsafe.As<RespBoolean, T>(ref cloned), lifetime);
     }
 
@@ -40,7 +39,7 @@ public readonly struct RespBoolean : IRespResponse
 
     public void Dispose()
     {
-        if(_guard.CanDispose()) 
+        if(_guard.TryDispose()) 
             _frame.Dispose();
     }
 }

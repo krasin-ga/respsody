@@ -4,10 +4,10 @@ using Respsody.Memory;
 
 namespace Respsody.Resp;
 
-public readonly struct RespSet(RespAggregate respAggregate, CompletionGuard guard) : IRespResponse
+public readonly struct RespSet(RespAggregate respAggregate, DisposalGuard guard) : IRespResponse
 {
     public int Length { get; } = respAggregate.Length - 1;
-    public RespValueVariant this[int i] => respAggregate[i + 1];
+    public OwnedRespValueVariant this[int i] => new(respAggregate[i + 1], guard);
 
     public T[] ToArrayOf<T>(IRespCodec codec)
     {
@@ -46,7 +46,7 @@ public readonly struct RespSet(RespAggregate respAggregate, CompletionGuard guar
 
     public void Dispose()
     {
-        if(guard.CanDispose())
+        if(guard.TryDispose())
             respAggregate.Dispose();
     }
 

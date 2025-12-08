@@ -5,31 +5,27 @@ using Respsody.Memory;
 
 namespace Respsody.Resp;
 
-public readonly struct RespArray(RespAggregate respAggregate, CompletionGuard completion) : IRespResponse
+public readonly struct RespArray(RespAggregate respAggregate, DisposalGuard guard) : IRespResponse
 {
     public int Length { get; } = respAggregate.Length - 1;
 
-    private RespValueVariant this[int i] => respAggregate[i + 1];
+    public OwnedRespValueVariant this[int i] => new(respAggregate[i + 1], guard);
 
     public Enumerator<RespString> EnumerateStrings()
     {
-        return new Enumerator<RespString>(respAggregate, variant => variant.ToRespStringView());
+        return new Enumerator<RespString>(respAggregate, variant => variant.ToRespStringView(), guard);
     }
 
-    public Enumerator<T> Enumerate<T>(Func<RespValueVariant, T> convert)
+    public Enumerator<T> Enumerate<T>(Func<OwnedRespValueVariant, T> convert)
         where T : IRespResponse
     {
-        return new Enumerator<T>(respAggregate, convert);
-    }
-
-    public T ElementAt<T>(int i, Func<RespValueVariant, T> convert)
-        where T : IRespResponse
-    {
-        return convert(this[i]);
+        return new Enumerator<T>(respAggregate, convert, guard);
     }
 
     public T[] ToArrayOf<T>(IRespCodec codec)
     {
+        guard.CheckDisposed();
+
         var array = new T[Length];
         for (var i = 0; i < Length; i++)
             array[i] = codec.Decode<T>(this[i]);
@@ -39,6 +35,8 @@ public readonly struct RespArray(RespAggregate respAggregate, CompletionGuard co
 
     public T[] ToArrayOf<T>(Decode<T> decode)
     {
+        guard.CheckDisposed();
+
         var array = new T[Length];
         for (var i = 0; i < Length; i++)
             array[i] = decode(this[i]);
@@ -48,7 +46,7 @@ public readonly struct RespArray(RespAggregate respAggregate, CompletionGuard co
 
     public void Dispose()
     {
-        if (completion.CanDispose())
+        if (guard.TryDispose())
             respAggregate.Dispose();
     }
 
@@ -65,7 +63,7 @@ public readonly struct RespArray(RespAggregate respAggregate, CompletionGuard co
         return frame.GetRespType() is RespType.Array;
     }
 
-    public struct Enumerator<T>(RespAggregate data, Func<RespValueVariant, T> convert) : IEnumerator<T>
+    public struct Enumerator<T>(RespAggregate data, Func<OwnedRespValueVariant, T> convert, DisposalGuard guard) : IEnumerator<T>
     {
         private int _index = -1;
         private T _current = default!;
@@ -75,7 +73,7 @@ public readonly struct RespArray(RespAggregate respAggregate, CompletionGuard co
             if (++_index >= data.Length)
                 return false;
 
-            _current = convert(data[_index]);
+            _current = convert(new OwnedRespValueVariant(data[_index], guard));
             return true;
         }
 

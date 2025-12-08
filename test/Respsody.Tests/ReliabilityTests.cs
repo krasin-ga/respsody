@@ -16,7 +16,8 @@ namespace Respsody.Tests;
 public class ReliabilityTests(RedisSingleNodeFixture fixture, ITestOutputHelper @out) : IClassFixture<RedisSingleNodeFixture>
 {
     [Theory]
-    [InlineData(50)]
+    // [InlineData(50000)]
+    [InlineData(100)]
     public async Task ShouldBeProtectedAgainstMultipleDisposals(int iterations)
     {
         var client = await new RespClientFactory()
@@ -49,10 +50,6 @@ public class ReliabilityTests(RedisSingleNodeFixture fixture, ITestOutputHelper 
                                 if (!result.ToString(Encoding.UTF8)!.SequenceEqual(str))
                                     throw new Exception($"this should not happen // {i} // {str} != {result.AsUnicodeSpan()}");
 
-                                // redundant disposals
-                                // don't try this at home
-
-                                result.Dispose();
 
                                 var str1 = i.ToString();
                                 var str2 = (-i).ToString();
@@ -67,8 +64,8 @@ public class ReliabilityTests(RedisSingleNodeFixture fixture, ITestOutputHelper 
 
                                 using var mgetResult = await client.Mget([key1, key2]);
 
-                                var v1 = mgetResult.ElementAt(0, v => v.ToRespStringView());
-                                var v2 = mgetResult.ElementAt(1, v => v.ToRespStringView());
+                                var v1 = mgetResult[0].ToRespStringView();
+                                var v2 = mgetResult[1].ToRespStringView();
 
                                 if (!v1.ToString(Encoding.UTF8)!.SequenceEqual(str1))
                                     throw new Exception($"this should not happen // {i} // {str1} != {v1.AsUnicodeSpan()}");
@@ -87,7 +84,7 @@ public class ReliabilityTests(RedisSingleNodeFixture fixture, ITestOutputHelper 
                                 v2.Dispose();
                                 v1.Dispose();
                                 v2.Dispose();
-
+                                result.Dispose();
                                 result.Dispose();
                             }));
         }

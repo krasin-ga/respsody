@@ -4,11 +4,11 @@ using Respsody.Memory;
 
 namespace Respsody.Resp;
 
-public readonly struct RespMap(RespAggregate respAggregate, CompletionGuard guard) : IRespResponse
+public readonly struct RespMap(RespAggregate respAggregate, DisposalGuard guard) : IRespResponse
 {
     public int Length { get; } = (respAggregate.Length - 1) / 2;
 
-    public IReadOnlyDictionary<TKey, object?> ToMapOf<TKey>(DecodeSlice<TKey> decode)
+    public IReadOnlyDictionary<TKey, object?> ToMapOf<TKey>(DecodeFrame<TKey> decode)
         where TKey : notnull
     {
         var length = respAggregate.Length;
@@ -19,7 +19,8 @@ public readonly struct RespMap(RespAggregate respAggregate, CompletionGuard guar
             if (key.Simple is null)
                 throw new InvalidOperationException("Expected key not to be a collection");
 
-            dictionary[decode(key.Simple.Value)] = respAggregate[i + 1].ToClrValue();
+            dictionary[decode(new OwnedRespFrame(key.Simple.Value, guard))]
+                = new OwnedRespValueVariant(respAggregate[i + 1], guard).ToClrValue();
         }
 
         return dictionary;
@@ -27,14 +28,13 @@ public readonly struct RespMap(RespAggregate respAggregate, CompletionGuard guar
 
     public IReadOnlyDictionary<string, object?> ToMapWithStringKey()
     {
-        return ToMapOf(
-            static (in Frame<RespContext> slice)
-                => slice.ToRespStringView().ToString()!);
+        return ToMapOf(static (in OwnedRespFrame slice)
+            => slice.ToRespStringView().ToString()!);
     }
 
     public void Dispose()
     {
-        if(guard.CanDispose()) 
+        if (guard.TryDispose())
             respAggregate.Dispose();
     }
 

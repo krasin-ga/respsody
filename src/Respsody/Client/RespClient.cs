@@ -29,8 +29,10 @@ public sealed class RespClient(
     private RespAggregate? _attribute;
     private GCHandle? _handlersHandle;
     private StructuredSocket<RespContext, Payload>? _structuredSocket;
+    private readonly DisposalGuard _dummyGuard = new(new CompletionGuard(), checkOnly: true);
     public ConnectionMetadata? Metadata { get; private set; }
     public IReadOnlyDictionary<string, string?> ConnectionConfig => connectionProcedure.Config;
+
 
     internal async Task Connect()
     {
@@ -40,7 +42,7 @@ public sealed class RespClient(
 
         await _initialConnectionLock.WaitAsync(cts.Token);
 
-        if (_structuredSocket is { })
+        if (_structuredSocket is not null)
         {
             _initialConnectionLock.Release();
             return;
@@ -148,7 +150,8 @@ public sealed class RespClient(
         return taskCompletionSource.AsValueTask();
     }
 
-    public ComboCommand<T> Pack<T>(Combo combo, Command<T> command, CancellationToken token = default) where T : IRespResponse
+    public ComboCommand<T> Pack<T>(Combo combo, Command<T> command, CancellationToken token = default)
+        where T : IRespResponse
     {
         if (_structuredSocket?.IsDisposed is true)
         {
@@ -209,6 +212,7 @@ public sealed class RespClient(
         var ticks = Environment.TickCount;
 
         using (readyFrames)
+        {
             foreach (var sliceMemory in readyFrames)
             {
                 if (!_respFrameAggregationStrategy.Aggregate(
@@ -225,6 +229,7 @@ public sealed class RespClient(
                 if (variant.Aggregate is { } aggregate)
                     HandleAggregate(aggregate, ticks);
             }
+        }
     }
 
     private void HandleAggregate(RespAggregate aggregate, int ticks)
@@ -237,14 +242,16 @@ public sealed class RespClient(
 
         if (aggregate.HeaderFrame.Context.Type == RespType.Push)
         {
-            if (aggregate.ToRespPushView().TryGetSubscription(out var data))
+            if (aggregate.ToRespPushView(_dummyGuard).TryGetSubscription(out var data))
             {
                 var idx = 0;
                 foreach (var confirmation in _subUnSubConfirmationsQueue)
                 {
-                    if (confirmation.Handle(data.Command, data.Ack) is var res && res != SubUnSub.HandleResult.Unhandled)
+                    if (confirmation.Handle(data.Command, data.Ack) is var res &&
+                        res != SubUnSub.HandleResult.Unhandled)
                     {
-                        if (_responseQueue.TryPeek(out var peeked) && peeked.IsSubscription(confirmation.Command, confirmation.Acks))
+                        if (_responseQueue.TryPeek(out var peeked) &&
+                            peeked.IsSubscription(confirmation.Command, confirmation.Acks))
                             _responseQueue.TryDequeue(out _);
 
                         if (idx == 0 && res == SubUnSub.HandleResult.Completed)
@@ -302,7 +309,8 @@ public sealed class RespClient(
             if (!_responseQueue.TryDequeue(out _))
                 Panic("[on disconnected] failed to dequeue response for completion with error");
 
-            response.CompleteWithException(exception ?? new RespConnectionLostException(), ticks: Environment.TickCount);
+            response.CompleteWithException(exception ?? new RespConnectionLostException(),
+                ticks: Environment.TickCount);
         }
 
         while (_subUnSubConfirmationsQueue.TryPeek(out var sub) && sub.ConnectionGeneration <= generation)
@@ -314,7 +322,8 @@ public sealed class RespClient(
         }
     }
 
-    public async ValueTask InitializeConnection(ConnectedSocket connectedSocket, int generation, CancellationToken cancellationToken)
+    public async ValueTask InitializeConnection(ConnectedSocket connectedSocket, int generation,
+        CancellationToken cancellationToken)
     {
         Metadata = connectedSocket.Metadata;
         foreach (var initialization in options.ConnectionInitializations)
@@ -404,7 +413,8 @@ public sealed class RespClient(
             ConnectionGeneration = socketId;
             respClient._responseQueue.Enqueue(this);
             if (responseType == ResponseType.Subscription)
-                respClient._subUnSubConfirmationsQueue.Enqueue(new SubUnSub(command, subAcks!, socketId, taskCompletionSource, _ct));
+                respClient._subUnSubConfirmationsQueue.Enqueue(new SubUnSub(command, subAcks!, socketId,
+                    taskCompletionSource, _ct));
 
             return true;
         }
@@ -415,7 +425,8 @@ public sealed class RespClient(
             if (elapsed > timeout)
             {
                 InternalCompleteWithException(
-                    new TimeoutException($"The command expired before receiving a response. Timeout={timeout}ms, Elapsed={elapsed}ms")
+                    new TimeoutException(
+                        $"The command expired before receiving a response. Timeout={timeout}ms, Elapsed={elapsed}ms")
                 );
 
                 respClient._clientHandler?.OnCommandTimedOut(respClient, elapsed, command);
@@ -450,7 +461,7 @@ public sealed class RespClient(
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void CompleteWithException(Exception exception, int ticks)
         {
-            if (_ct?.CanComplete() is false)
+            if (_ct?.TryComplete() is false)
                 return;
 
             taskCompletionSource.SetException(exception);
@@ -460,7 +471,7 @@ public sealed class RespClient(
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void InternalCompleteWithException(Exception exception)
         {
-            if (_ct?.CanComplete() is false)
+            if (_ct?.TryComplete() is false)
                 return;
 
             taskCompletionSource.SetException(exception);
@@ -468,7 +479,7 @@ public sealed class RespClient(
 
         public void Complete(RespAggregate aggregate, int ticks, RespAggregate? attribute)
         {
-            if (_ct?.CanComplete() is false)
+            if (_ct?.TryComplete() is false)
                 return;
 
             respClient._clientHandler?.OnCommandExecuted(respClient, ticks - startTicks, command);
@@ -517,7 +528,7 @@ public sealed class RespClient(
 
         public void Complete(Frame<RespContext> frame, int ticks, RespAggregate? attribute)
         {
-            if (_ct?.CanComplete() is false)
+            if (_ct?.TryComplete() is false)
                 return;
 
             respClient._clientHandler?.OnCommandExecuted(respClient, ticks - startTicks, command);
@@ -715,7 +726,7 @@ public sealed class RespClient(
                 ? HandleResult.Completed
                 : HandleResult.Handled;
 
-            if (result == HandleResult.Completed && ct.CanComplete())
+            if (result == HandleResult.Completed && ct.TryComplete())
                 taskCompletionSource.SetResult(new RespSubscriptionAck(Acks));
 
             return result;
@@ -723,7 +734,7 @@ public sealed class RespClient(
 
         public void CompleteWithException(Exception exception)
         {
-            if (ct.CanComplete())
+            if (ct.TryComplete())
                 taskCompletionSource.SetException(exception);
         }
     }

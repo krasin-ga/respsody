@@ -13,9 +13,9 @@ public readonly struct RespString : IRespResponse
     private const int VerbatimOffset = FormatLength + 1;
 
     private readonly Frame<RespContext> _frame;
-    private readonly CompletionGuard _guard;
+    private readonly DisposalGuard _guard;
 
-    public RespString(Frame<RespContext> frame, CompletionGuard guard)
+    public RespString(Frame<RespContext> frame, DisposalGuard guard)
     {
         Debug.Assert(CanConvert(frame));
 
@@ -67,6 +67,8 @@ public readonly struct RespString : IRespResponse
 
     public ReadOnlySpan<byte> GetSpan()
     {
+        _guard.CheckDisposed();
+
         switch (_frame.GetRespType())
         {
             case RespType.SimpleString:
@@ -86,7 +88,7 @@ public readonly struct RespString : IRespResponse
 
     public void Dispose()
     {
-        if(_guard?.CanDispose() is not false) 
+        if(_guard.TryDispose()) 
             _frame.Dispose();
     }
 
@@ -94,7 +96,7 @@ public readonly struct RespString : IRespResponse
         where T : IRespResponse
     {
         var (frame, lifetime) = _frame.AsExternallyOwned();
-        var cloned = new RespString(frame, CompletionGuard.Restrictive);
+        var cloned = new RespString(frame, _guard.ToCheckOnly());
         return (Unsafe.As<RespString, T>(ref cloned), lifetime);
     }
 }

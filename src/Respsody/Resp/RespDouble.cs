@@ -9,9 +9,9 @@ namespace Respsody.Resp;
 public readonly struct RespDouble : IRespResponse
 {
     private readonly Frame<RespContext> _frame;
-    private readonly CompletionGuard _guard;
+    private readonly DisposalGuard _guard;
 
-    public RespDouble(Frame<RespContext> frame, CompletionGuard guard)
+    public RespDouble(Frame<RespContext> frame, DisposalGuard guard)
     {
         Debug.Assert(CanConvert(frame));
 
@@ -67,7 +67,7 @@ public readonly struct RespDouble : IRespResponse
 
     public void Dispose()
     {
-        if(_guard.CanDispose())
+        if(_guard.TryDispose())
             _frame.Dispose();
     }
 
@@ -75,7 +75,7 @@ public readonly struct RespDouble : IRespResponse
         where T : IRespResponse
     {
         var (frame, lifetime) = _frame.AsExternallyOwned();
-        var cloned = new RespDouble(frame, CompletionGuard.Restrictive);
+        var cloned = new RespDouble(frame, _guard.ToCheckOnly());
         return (Unsafe.As<RespDouble, T>(ref cloned), lifetime);
     }
 

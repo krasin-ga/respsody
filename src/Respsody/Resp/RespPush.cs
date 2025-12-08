@@ -3,12 +3,22 @@ using Respsody.Memory;
 
 namespace Respsody.Resp;
 
-public readonly struct RespPush(RespAggregate respAggregate, CompletionGuard guard) : IDisposable
+public readonly struct RespPush : IDisposable
 {
-    public int Length { get; } = respAggregate.Length - 1;
+    private readonly RespAggregate _respAggregate;
+    private readonly DisposalGuard _guard;
 
-    public RespValueVariant this[int i] =>
-        respAggregate[i + 1];
+    internal RespPush(RespAggregate respAggregate, DisposalGuard guard)
+    {
+        _respAggregate = respAggregate;
+        _guard = guard;
+        Length = respAggregate.Length - 1;
+    }
+
+    public int Length { get; }
+
+    public OwnedRespValueVariant this[int i] =>
+        new (_respAggregate[i + 1], _guard);
 
     public T[] ToArrayOf<T>(IRespCodec codec)
     {
@@ -30,8 +40,8 @@ public readonly struct RespPush(RespAggregate respAggregate, CompletionGuard gua
 
     public void Dispose()
     {
-        if(guard.CanDispose())
-            respAggregate.Dispose();
+        if(_guard.TryDispose())
+            _respAggregate.Dispose();
     }
 
     public static bool CanConvert(Frame<RespContext> frame)
