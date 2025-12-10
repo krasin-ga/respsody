@@ -2,10 +2,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![respsody Nuget](https://img.shields.io/nuget/v/Respsody?&label=Respsody)](https://www.nuget.org/packages/Respsody/)
 
-<img alt="Respsody" src="assets/respsody_logo.svg" align="right" /> **Respsody** is an experimental, high-performance, asynchronous, general-purpose [RESP3](https://github.com/redis/redis-specifications/blob/master/protocol/RESP3.md) client library written in C#. It's currently in an early stage of development and intended for experimentation and community feedback.
-
- ⚠️ This library is **not production-ready** at the moment. Expect breaking changes, missing features, and limited error handling. 
-
+<img alt="Respsody" src="assets/respsody_logo.svg" align="right" /> **Respsody** is an experimental, high-performance, asynchronous, general-purpose [RESP3](https://github.com/redis/redis-specifications/blob/master/protocol/RESP3.md) client library written in C#. It's currently in an early stage of development and intended for experimentation and community feedback. Expect breaking changes, missing features, and limited error handling. 
 
 ## Features
 

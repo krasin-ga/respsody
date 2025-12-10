@@ -29,7 +29,7 @@ public readonly struct RespMap(RespAggregate respAggregate, DisposalGuard guard)
     public IReadOnlyDictionary<string, object?> ToMapWithStringKey()
     {
         return ToMapOf(static (in OwnedRespFrame slice)
-            => slice.ToRespStringView().ToString()!);
+            => slice.ToRespString().ToString()!);
     }
 
     public void Dispose()

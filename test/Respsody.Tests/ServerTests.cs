@@ -1,10 +1,12 @@
 ﻿using System;
 using System.Linq;
+using System.Net;
 using System.Text;
 using System.Threading.Tasks;
 using Respsody.Client.Connection;
 using Respsody.Client.Connection.Options;
 using Respsody.Client.Options;
+using Respsody.Resp;
 using Respsody.Tests.Library;
 using Xunit;
 using Xunit.Abstractions;

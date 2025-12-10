@@ -9,13 +9,13 @@ public static class PushExtensions
 
     public static bool TryGetSubscription(this RespPush respPush, [NotNullWhen(true)]out SubscriptionHandle? handle)
     {
-        var kind = respPush[0].ToRespStringView().GetSpan();
+        var kind = respPush[0].ToRespString().GetSpan();
 
         if (kind.EndsWith(Subscribe))
         {
             handle = new SubscriptionHandle(
                 DefaultRespEncoding.Value.GetString(kind),
-                new Bytes(respPush[1].ToRespStringView().GetSpan().ToArray()));
+                new Bytes(respPush[1].ToRespString().GetSpan().ToArray()));
 
             return true;
         }
@@ -26,16 +26,16 @@ public static class PushExtensions
 
     public static RespString GetMessageKind(this RespPush respPush)
     {
-        return respPush[0].ToRespStringView();
+        return respPush[0].ToRespString();
     }
 
     public static RespString GetChannel(this RespPush respPush)
     {
-        return respPush[1].ToRespStringView();
+        return respPush[1].ToRespString();
     }
 
     public static RespString GetPushMessage(this RespPush respPush)
     {
-        return respPush[2].ToRespStringView();
+        return respPush[2].ToRespString();
     }
 }

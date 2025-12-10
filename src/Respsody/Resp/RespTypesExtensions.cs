@@ -6,7 +6,7 @@ namespace Respsody.Resp;
 
 public static class RespTypesExtensions
 {
-    public static RespString ToRespStringView(this in OwnedRespValueVariant ownedRespValueVariant)
+    public static RespString ToRespString(this in OwnedRespValueVariant ownedRespValueVariant)
     {
         var variant = ownedRespValueVariant.Variant;
         if (variant.Simple is not { } simple || !RespString.CanConvert(simple))
@@ -16,7 +16,7 @@ public static class RespTypesExtensions
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static RespString ToRespStringView(this in OwnedRespFrame ownedFrame)
+    internal static RespString ToRespString(this in OwnedRespFrame ownedFrame)
     {
         var frame = ownedFrame.Frame;
         if (!RespString.CanConvert(frame))
@@ -25,7 +25,7 @@ public static class RespTypesExtensions
         return new RespString(frame, ownedFrame.Guard);
     }
 
-    public static RespDouble ToRespDoubleView(this in OwnedRespValueVariant ownedRespValueVariant)
+    public static RespDouble ToRespDouble(this in OwnedRespValueVariant ownedRespValueVariant)
     {
         var variant = ownedRespValueVariant.Variant;
 
@@ -36,7 +36,7 @@ public static class RespTypesExtensions
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static RespDouble ToRespDoubleView(this in OwnedRespFrame ownedFrame)
+    internal static RespDouble ToRespDouble(this in OwnedRespFrame ownedFrame)
     {
         var frame = ownedFrame.Frame;
         if (!RespDouble.CanConvert(frame))
@@ -45,7 +45,7 @@ public static class RespTypesExtensions
         return new RespDouble(frame, ownedFrame.Guard);
     }
 
-    public static RespNumber ToRespNumberView(this in OwnedRespValueVariant ownedRespValueVariant)
+    public static RespNumber ToRespNumber(this in OwnedRespValueVariant ownedRespValueVariant)
     {
         var variant = ownedRespValueVariant.Variant;
 
@@ -56,7 +56,7 @@ public static class RespTypesExtensions
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static RespNumber ToRespNumberView(this in OwnedRespFrame ownedFrame)
+    internal static RespNumber ToRespNumber(this in OwnedRespFrame ownedFrame)
     {
         var frame = ownedFrame.Frame;
         if (!RespNumber.CanConvert(frame))
@@ -65,7 +65,7 @@ public static class RespTypesExtensions
         return new RespNumber(frame, ownedFrame.Guard);
     }
 
-    public static RespBigNumber ToRespBigNumberView(this in OwnedRespValueVariant ownedRespValueVariant)
+    public static RespBigNumber ToRespBigNumber(this in OwnedRespValueVariant ownedRespValueVariant)
     {
         var variant = ownedRespValueVariant.Variant;
 
@@ -76,7 +76,7 @@ public static class RespTypesExtensions
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static RespBigNumber ToRespBigNumberView(this in OwnedRespFrame ownedFrame)
+    internal static RespBigNumber ToRespBigNumber(this in OwnedRespFrame ownedFrame)
     {
         var frame = ownedFrame.Frame;
         if (!RespBigNumber.CanConvert(frame))
@@ -85,7 +85,7 @@ public static class RespTypesExtensions
         return new RespBigNumber(frame, ownedFrame.Guard);
     }
 
-    public static RespArray ToRespArrayView(this in OwnedRespValueVariant ownedRespValueVariant)
+    public static RespArray ToRespArray(this in OwnedRespValueVariant ownedRespValueVariant)
     {
         var variant = ownedRespValueVariant.Variant;
 
@@ -95,7 +95,7 @@ public static class RespTypesExtensions
         return new RespArray(agg, ownedRespValueVariant.Guard);
     }
 
-    public static RespMap ToRespMapView(this in OwnedRespValueVariant ownedRespValueVariant)
+    public static RespMap ToRespMap(this in OwnedRespValueVariant ownedRespValueVariant)
     {
         var variant = ownedRespValueVariant.Variant;
 
@@ -106,7 +106,7 @@ public static class RespTypesExtensions
     }
 
 
-    public static RespSet ToRespSetView(this in OwnedRespValueVariant ownedRespValueVariant)
+    public static RespSet ToRespSet(this in OwnedRespValueVariant ownedRespValueVariant)
     {
         var variant = ownedRespValueVariant.Variant;
 
@@ -182,7 +182,7 @@ public static class RespTypesExtensions
         };
     }
 
-    internal static RespArray ToRespArrayView(this RespAggregate slice, DisposalGuard guard)
+    internal static RespArray ToRespArray(this RespAggregate slice, DisposalGuard guard)
     {
         if (!RespArray.CanConvert(slice.HeaderFrame))
             throw CreateConversionException(slice.HeaderFrame);
@@ -190,7 +190,7 @@ public static class RespTypesExtensions
         return new RespArray(slice, guard.ToCheckOnly());
     }
 
-    internal static RespMap ToRespMapView(this RespAggregate slice, DisposalGuard guard)
+    internal static RespMap ToRespMap(this RespAggregate slice, DisposalGuard guard)
     {
         if (!RespMap.CanConvert(slice.HeaderFrame))
             throw CreateConversionException(slice.HeaderFrame);
@@ -198,7 +198,7 @@ public static class RespTypesExtensions
         return new RespMap(slice, guard.ToCheckOnly());
     }
 
-    internal static RespPush ToRespPushView(this RespAggregate slice, DisposalGuard guard)
+    internal static RespPush ToRespPush(this RespAggregate slice, DisposalGuard guard)
     {
         if (!RespPush.CanConvert(slice.HeaderFrame))
             throw CreateConversionException(slice.HeaderFrame);

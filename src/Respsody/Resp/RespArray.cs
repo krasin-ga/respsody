@@ -13,7 +13,7 @@ public readonly struct RespArray(RespAggregate respAggregate, DisposalGuard guar
 
     public Enumerator<RespString> EnumerateStrings()
     {
-        return new Enumerator<RespString>(respAggregate, variant => variant.ToRespStringView(), guard);
+        return new Enumerator<RespString>(respAggregate, variant => variant.ToRespString(), guard);
     }
 
     public Enumerator<T> Enumerate<T>(Func<OwnedRespValueVariant, T> convert)

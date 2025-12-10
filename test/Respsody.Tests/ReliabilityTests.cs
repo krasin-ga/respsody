@@ -63,9 +63,9 @@ public class ReliabilityTests(RedisSingleNodeFixture fixture, ITestOutputHelper 
                                 await client.Mset([(key1, value1), (key2, value2)]);
 
                                 using var mgetResult = await client.Mget([key1, key2]);
-
-                                var v1 = mgetResult[0].ToRespStringView();
-                                var v2 = mgetResult[1].ToRespStringView();
+                                
+                                var v1 = mgetResult[0].ToRespString();
+                                var v2 = mgetResult[1].ToRespString();
 
                                 if (!v1.ToString(Encoding.UTF8)!.SequenceEqual(str1))
                                     throw new Exception($"this should not happen // {i} // {str1} != {v1.AsUnicodeSpan()}");

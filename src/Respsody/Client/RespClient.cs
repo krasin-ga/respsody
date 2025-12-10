@@ -242,7 +242,7 @@ public sealed class RespClient(
 
         if (aggregate.HeaderFrame.Context.Type == RespType.Push)
         {
-            if (aggregate.ToRespPushView(_dummyGuard).TryGetSubscription(out var data))
+            if (aggregate.ToRespPush(_dummyGuard).TryGetSubscription(out var data))
             {
                 var idx = 0;
                 foreach (var confirmation in _subUnSubConfirmationsQueue)

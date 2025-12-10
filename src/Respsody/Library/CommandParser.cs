@@ -40,13 +40,15 @@ internal static class CommandParser
                 throw new InvalidOperationException("Command must be array of bulk strings");
 
             using var agg = value.Aggregate!;
-            var array = value.Aggregate!.ToRespArrayView(disposalGuard);
+            var array = value.Aggregate!.ToRespArray(disposalGuard);
 
             if (array.Length <= 1)
                 throw new InvalidOperationException("Command must have arguments");
 
-            static Bytes Decode(in OwnedRespValueVariant valueVariant) =>
-                new(valueVariant.ToRespStringView().GetSpan().ToArray());
+            static Bytes Decode(in OwnedRespValueVariant valueVariant)
+            {
+                return new Bytes(valueVariant.ToRespString().GetSpan().ToArray());
+            }
 
             return array.ToArrayOf(Decode)[1..];
         }

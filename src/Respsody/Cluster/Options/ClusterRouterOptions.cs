@@ -12,7 +12,7 @@ public class ClusterRouterOptions
     public int ConnectionTimeoutMs { get; init; } = 10_000;
     public required RespClientOptions ClientOptions { get; init; }
     public bool EnableAutoRedirections { get; init; }
-    public IReadOnlyDictionary<string, object> Metadata { get; init; }
+    public IReadOnlyDictionary<string, object> Metadata { get; init; } = new Dictionary<string, object>();
     public IClusterRouterHandler? ClusterRouterHandler { get; init; }
     public TimeSpan SyncInterval { get; init; } = TimeSpan.FromMinutes(5);
 
