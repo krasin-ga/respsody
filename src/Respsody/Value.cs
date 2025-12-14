@@ -1,4 +1,5 @@
 ﻿using System.Buffers;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using Respsody.Exceptions;
@@ -11,8 +12,9 @@ namespace Respsody;
 public readonly struct Value
 {
     private readonly string? _string;
-    private readonly ReadOnlyMemory<byte>? _memory;
+    private readonly ReadOnlyMemory<byte> _memory;
     private readonly Encoding? _stringEncoding;
+    private readonly IWritableValue? _writableValue;
 
     public Value(string value, Encoding? encoding = null)
     {
@@ -25,12 +27,23 @@ public readonly struct Value
         _memory = memory;
     }
 
+    public Value(IWritableValue writableValue)
+    {
+        _writableValue = writableValue;
+    }
+
     internal void WriteTo(OutgoingBuffer page)
     {
-        if (_memory is { } memory)
+        if (!_memory.IsEmpty)
         {
-            var span = memory.Span;
+            var span = _memory.Span;
             page.WriteBulkString(span);
+            return;
+        }
+
+        if (_writableValue is { })
+        {
+            page.WriteBulkStringBuffered(_writableValue);
             return;
         }
 
@@ -68,4 +81,5 @@ public readonly struct Value
     public static Value Utf8(string str) => new(str, Encoding.UTF8);
     public static Value Memory(ReadOnlyMemory<byte> memory) => new(memory);
     public static Value ByteArray(byte[] memory) => new(memory);
+    public static Value FromWritable(IWritableValue writableValue) => new(writableValue);
 }

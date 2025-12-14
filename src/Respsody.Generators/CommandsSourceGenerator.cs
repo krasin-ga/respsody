@@ -29,9 +29,8 @@ internal class CommandsSourceGenerator : IIncrementalGenerator
             (syntaxNode, _) => IsCommandDefinitionClass(syntaxNode),
             (ctx, _) => (ctx.Node, ctx.SemanticModel));
 
-        var commandContexts = contextSyntaxProvider.SelectMany(
-            (v, ct) => CreateRespCommandContext(v.Node, v.SemanticModel, ct)
-        );
+        var commandContexts = contextSyntaxProvider
+            .SelectMany((v, ct) => CreateRespCommandContext(v.Node, v.SemanticModel, ct));
 
         var parsingErrors = commandContexts.Where(ctx => ctx.ErrorContext is { })
             .Select((ctx, _) => ctx.ErrorContext!);
@@ -57,9 +56,8 @@ internal class CommandsSourceGenerator : IIncrementalGenerator
     {
         var explicationsWithCtx = new List<ExplicationWithContext>();
         var visitedExplications = new HashSet<(CommandNodeExplication.Explication, string)>();
-        var orderedGrouping = commandGrouping.OrderByDescending(
-            c => c.ExplicitPriority ?? int.MinValue + c.Location.SourceSpan.Start
-        );
+        var orderedGrouping = commandGrouping
+            .OrderByDescending(c => c.ExplicitPriority ?? int.MinValue + c.Location.SourceSpan.Start);
 
         foreach (var ctx in orderedGrouping)
         foreach (var explication in new CommandNodeExplication(ctx.CommandSyntaxNode).TraverseWithStack())
@@ -159,9 +157,6 @@ internal class CommandsSourceGenerator : IIncrementalGenerator
         //    new SyntaxList<AttributeListSyntax>(Build.ClassAttributes())
         //    );
 
-        var @namespace = NamespaceDeclaration(IdentifierName(ns))
-            .AddMembers(@class);
-
         var compilationUnit = CompilationUnit()
             .AddUsings(
                 UsingDirective(IdentifierName("System")),
@@ -170,7 +165,9 @@ internal class CommandsSourceGenerator : IIncrementalGenerator
                 UsingDirective(IdentifierName("Respsody.Client")),
                 UsingDirective(IdentifierName("Respsody.Resp")),
                 UsingDirective(IdentifierName("Respsody")))
-            .AddMembers(@namespace);
+            .AddMembers(string.IsNullOrWhiteSpace(ns)
+                            ? @class
+                            : NamespaceDeclaration(IdentifierName(ns)).AddMembers(@class));
 
         var code = compilationUnit.NormalizeWhitespace().ToFullString();
 
@@ -197,9 +194,8 @@ internal class CommandsSourceGenerator : IIncrementalGenerator
             if (semanticModel.GetDeclaredSymbol(node) is not INamedTypeSymbol symbol)
                 throw new InvalidCastException("Node is not NamedTypeSyntax");
 
-            var attributes = symbol.GetAttributes().Where(
-                a => a.AttributeClass?.ContainingNamespace.Name == AttributeNamespace
-                     && a.AttributeClass.Name == AttributeFullName);
+            var attributes = symbol.GetAttributes().Where(a => a.AttributeClass?.ContainingNamespace.Name == AttributeNamespace
+                                                               && a.AttributeClass.Name == AttributeFullName);
 
             foreach (var attribute in attributes)
             {
@@ -220,12 +216,10 @@ internal class CommandsSourceGenerator : IIncrementalGenerator
                     continue;
                 }
 
-                var methodName = attribute.NamedArguments.FirstOrDefault(
-                    a => a.Key == "MethodName"
+                var methodName = attribute.NamedArguments.FirstOrDefault(a => a.Key == "MethodName"
                 ).Value.Value as string;
 
-                var explicitPriority = attribute.NamedArguments.FirstOrDefault(
-                    a => a.Key == "ExplicitPriority"
+                var explicitPriority = attribute.NamedArguments.FirstOrDefault(a => a.Key == "ExplicitPriority"
                 ).Value.Value as int?;
 
                 var isPublic = true;
@@ -236,8 +230,12 @@ internal class CommandsSourceGenerator : IIncrementalGenerator
                         isPublic = false;
 
                 var @namespace = symbol.ContainingNamespace.IsGlobalNamespace
-                    ? symbol.ContainingAssembly.Name
+                    ? string.Empty
                     : symbol.ContainingNamespace.ToDisplayString();
+
+                if (attribute.NamedArguments.FirstOrDefault(a => a.Key == "Namespace"
+                    ).Value.Value is string preferredNamespace)
+                    @namespace = preferredNamespace;
 
                 result.Add(
                     (
@@ -269,10 +267,9 @@ internal class CommandsSourceGenerator : IIncrementalGenerator
             return false;
 
         return classDeclaration.Modifiers.Any(m => m.Text is "static")
-               && classDeclaration.AttributeLists.Any(
-                   attrList => attrList.Attributes
-                       .Any(attr => attr.Name is IdentifierNameSyntax { Identifier.Text: AttributeName or AttributeFullName }
-                                or QualifiedNameSyntax { Right.Identifier.Text: AttributeName or AttributeFullName }));
+               && classDeclaration.AttributeLists.Any(attrList => attrList.Attributes
+                                                          .Any(attr => attr.Name is IdentifierNameSyntax { Identifier.Text: AttributeName or AttributeFullName }
+                                                                   or QualifiedNameSyntax { Right.Identifier.Text: AttributeName or AttributeFullName }));
     }
 
     private class ErrorContext(Exception exception, Location location)

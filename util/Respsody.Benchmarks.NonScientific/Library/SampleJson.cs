@@ -1,8 +1,17 @@
-﻿namespace Respsody.Benchmarks.NonScientific.Library;
+﻿using Respsody.Memory;
+using System.Buffers;
+using System.Text.Json;
 
-internal class SampleJson
+namespace Respsody.Benchmarks.NonScientific.Library;
+
+public class SampleJson: IWritableValue
 {
     public required string StringValue { get; set; }
     public long ScalarValue { get; set; }
     public required float[] VectorValue { get; set; }
+    public void WriteToBuffer(IBufferWriter<byte> destination)
+    {
+        var utf8JsonWriter = new Utf8JsonWriter(destination);
+        JsonSerializer.Serialize(utf8JsonWriter, this, SampleJsonSerializerContext.Default.SampleJson);
+    }
 }
