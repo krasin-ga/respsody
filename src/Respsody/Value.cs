@@ -1,5 +1,5 @@
 ﻿using System.Buffers;
-using System.Runtime.CompilerServices;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using System.Text;
 using Respsody.Exceptions;
@@ -27,6 +27,7 @@ public readonly struct Value
         _memory = memory;
     }
 
+    [Experimental("RESPSODY_EXPERIMENTAL")]
     public Value(IWritableValue writableValue)
     {
         _writableValue = writableValue;
@@ -41,7 +42,7 @@ public readonly struct Value
             return;
         }
 
-        if (_writableValue is { })
+        if (_writableValue is not null)
         {
             page.WriteBulkStringBuffered(_writableValue);
             return;
@@ -81,5 +82,7 @@ public readonly struct Value
     public static Value Utf8(string str) => new(str, Encoding.UTF8);
     public static Value Memory(ReadOnlyMemory<byte> memory) => new(memory);
     public static Value ByteArray(byte[] memory) => new(memory);
+
+    [Experimental("RESPSODY_EXPERIMENTAL")] 
     public static Value FromWritable(IWritableValue writableValue) => new(writableValue);
 }

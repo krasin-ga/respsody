@@ -4,7 +4,7 @@ using System.Text.Json;
 
 namespace Respsody.Benchmarks.NonScientific.Library;
 
-public class SampleJson: IWritableValue
+public sealed class SampleJson: IWritableValue
 {
     public required string StringValue { get; set; }
     public long ScalarValue { get; set; }

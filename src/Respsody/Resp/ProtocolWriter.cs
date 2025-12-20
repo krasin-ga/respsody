@@ -91,10 +91,10 @@ public static class ProtocolWriter
         if (!Utf8Formatter.TryFormat(bytes, prefix, out _))
             throw new InvalidOperationException();
 
-        outgoingBuffer.Write(Constants.CRLF);
+        outgoingBuffer.WriteCrLf();
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void WriteBulkStringBuffered(
         this OutgoingBuffer outgoingBuffer,
         IWritableValue writeToBuffer)
@@ -106,15 +106,18 @@ public static class ProtocolWriter
 
         var bytes = bufferWriter.GetWrittenBytes();
 
-        if (bytes <= 0)
-            throw new InvalidOperationException("Unexpected zero bytes length");
+        if (bytes == 0)
+        {
+            outgoingBuffer.WriteCrLf();
+            return;
+        }
 
-        var neededDigits = (int)Math.Floor(Math.Log10(bytes) + 1);
-        prefix = prefix[(10 - neededDigits)..];
+        var digits = (int)Math.Floor(Math.Log10(bytes) + 1);
+        prefix = prefix[(10 - digits)..];
         if (!Utf8Formatter.TryFormat(bytes, prefix, out _))
             throw new InvalidOperationException($"Can't fit {bytes} into {Encoding.UTF8.GetString(prefix)}");
 
-        outgoingBuffer.Write(Constants.CRLF);
+        outgoingBuffer.WriteCrLf();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
@@ -163,7 +166,7 @@ public static class ProtocolWriter
     }
 
     //$0000000000\r\n
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static Span<byte> WriteZeroFilledMaxBulkStringPrefix(this OutgoingBuffer outgoingBuffer)
     {
         var memoryBlock = outgoingBuffer.GetCurrentBlock();
@@ -171,8 +174,7 @@ public static class ProtocolWriter
             memoryBlock = outgoingBuffer.ExtendToFitContiguous(MaxPrefixBytes);
         
         var writableSpan = memoryBlock.GetWritableSpan();
-        var readOnlySpan = "$0000000000\r\n"u8;
-        readOnlySpan.CopyTo(writableSpan);
+        "$0000000000\r\n"u8.CopyTo(writableSpan);
         memoryBlock.Advance(MaxPrefixBytes);
 
        return writableSpan[1..11];

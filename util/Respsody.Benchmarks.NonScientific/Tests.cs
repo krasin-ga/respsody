@@ -185,7 +185,7 @@ public class Tests(IDatabaseAsync db, IRespClient client)
                                    {
                                        var key = Key.Utf8(v.StringValue);
 
-                                       await client.Set(key, Value.FromWritable(v));
+                                       await client.Set(key, new Value(JsonSerializer.SerializeToUtf8Bytes(v, SampleJsonSerializerContext.Default.SampleJson)));
                                        using var val = await client.Get(key);
 
                                        var deserialized = JsonSerializer.Deserialize(val.GetSpan(), SampleJsonSerializerContext.Default.SampleJson)!;
@@ -208,7 +208,7 @@ public class Tests(IDatabaseAsync db, IRespClient client)
                            values.SelectTaskRun(
                                async v =>
                                {
-                                   await db.StringSetAsync(v.StringValue, JsonSerializer.SerializeToUtf8Bytes(v));
+                                   await db.StringSetAsync(v.StringValue, JsonSerializer.SerializeToUtf8Bytes(v, SampleJsonSerializerContext.Default.SampleJson));
                                    var stringGetAsync = (ReadOnlyMemory<byte>) await db.StringGetAsync(v.StringValue);
                                    var deserialized = JsonSerializer.Deserialize(stringGetAsync.Span, SampleJsonSerializerContext.Default.SampleJson)!;
 

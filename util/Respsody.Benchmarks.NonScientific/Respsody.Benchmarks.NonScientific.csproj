@@ -14,8 +14,8 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-	  <PackageReference Include="StackExchange.Redis" Version="2.8.41" />
-	  <PackageReference Include="Microsoft.Garnet" Version="1.0.72" />
+	  <PackageReference Include="StackExchange.Redis" Version="2.10.1" />
+	  <PackageReference Include="Microsoft.Garnet" Version="1.0.91" />
 	</ItemGroup>
 
   <ItemGroup>

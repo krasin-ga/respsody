@@ -5,7 +5,7 @@ try
 {
     BenchmarkEnvironment.Setup();
 
-    BenchmarkRunner.Run<ParallelBenchmark>();
+    BenchmarkRunner.Run<SequentialBenchmark>();
 }
 finally
 {

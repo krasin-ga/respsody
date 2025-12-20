@@ -471,7 +471,7 @@ public sealed class OutgoingBuffer
         }
     }
 
-    internal class BufferWriterAdapter(OutgoingBuffer p): IBufferWriter<byte>
+    internal sealed class BufferWriterAdapter(OutgoingBuffer p): IBufferWriter<byte>
     {
         private int _position;
 

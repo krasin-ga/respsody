@@ -37,6 +37,7 @@ var ipEndPoint = new IPEndPoint(IPAddress.Loopback, 6379);
 //     });
 //
 // garnet.Start();
+
 var rnd = new Random(42);
 var large_300 = Enumerable.Range(0, 1024 * 1024).OrderBy(s => rnd.Next()).Take(300)
     .Select(CreatePair)
@@ -44,14 +45,14 @@ var large_300 = Enumerable.Range(0, 1024 * 1024).OrderBy(s => rnd.Next()).Take(3
 
 var small_20K = Enumerable.Range(0, 20000).Select(i => CreatePair(i % 256 + 1)).ToArray();
 
-var plainJsons_10K = Enumerable.Range(0, 10000).Select(i => new SampleJson()
+var srcJsons_10K = Enumerable.Range(0, 10000).Select(i => new SampleJson()
 {
     StringValue = $"json_{i}",
     ScalarValue = i * i,
     VectorValue = [..Enumerable.Range(0, 16).Select(v => rnd.NextSingle())]
 }).ToArray();
 
-var jsons_10K = plainJsons_10K.Select(
+var jsons_10K = srcJsons_10K.Select(
     j => new KeyValuePair<string, byte[]>(
         j.StringValue,
         Encoding.UTF8.GetBytes(JsonSerializer.Serialize(j))
@@ -62,7 +63,7 @@ var clientFactory = new RespClientFactory();
 var client = await clientFactory.Create(
     new RespClientOptions()
     {
-        Handler = new RespClientHandler()
+        //Handler = new RespClientHandler()
     },
     new DefaultConnectionProcedure(new ConnectionOptions() { Endpoint = ipEndPoint.ToString() })
 );
@@ -76,44 +77,51 @@ var db = (await ConnectionMultiplexer.ConnectAsync(new ConfigurationOptions()
 
 var tests = new Tests(db, client);
 
-var iterSequential = 10;
-var itersConcurrent = 100;
-BenchmarkResult[] results =
-[
-    await RunTest(tests.SetGet_Sequential, Target.Respsody, small_20K, iterations: iterSequential),
-    await RunTest(tests.SetGet_Sequential, Target.StackOverflowRedis, small_20K, iterations: iterSequential),
-    
-    await RunTest(tests.SetGet_Sequential, Target.Respsody, large_300, iterations: iterSequential),
-    await RunTest(tests.SetGet_Sequential, Target.StackOverflowRedis, large_300, iterations: iterSequential),
-    
-    await RunTest(tests.SetGet_Sequential_WithJsonDeserialize, Target.Respsody, jsons_10K, iterations: iterSequential),
-    await RunTest(tests.SetGet_Sequential_WithJsonDeserialize, Target.StackOverflowRedis, jsons_10K, iterations: iterSequential),
-    
-    await RunTest(tests.SetGet_WhenEach, Target.Respsody, small_20K, iterations: itersConcurrent),
-    await RunTest(tests.SetGet_WhenEach, Target.StackOverflowRedis, small_20K, iterations: itersConcurrent),
-    
-    await RunTest(tests.OneSetTwoGets_WhenEach, Target.Respsody, small_20K, iterations: itersConcurrent),
-    await RunTest(tests.OneSetTwoGets_WhenEach, Target.StackOverflowRedis, small_20K, iterations: itersConcurrent),
-    
-    await RunTest(tests.SetGet_WhenEach_WithJsonDeserialize, Target.Respsody, jsons_10K, iterations: itersConcurrent),
-    await RunTest(tests.SetGet_WhenEach_WithJsonDeserialize, Target.StackOverflowRedis, jsons_10K, iterations: itersConcurrent),
+async Task<BenchmarkResult[]> RunTests(int iterSequential, int itersConcurrent)
+{
+    return
+    [
+        await RunTest(tests.SetGet_Sequential, Target.Respsody, small_20K, iterations: iterSequential),
+        await RunTest(tests.SetGet_Sequential, Target.StackOverflowRedis, small_20K, iterations: iterSequential),
+        
+        await RunTest(tests.SetGet_Sequential, Target.Respsody, large_300, iterations: iterSequential),
+        await RunTest(tests.SetGet_Sequential, Target.StackOverflowRedis, large_300, iterations: iterSequential),
+        
+        await RunTest(tests.SetGet_Sequential_WithJsonDeserialize, Target.Respsody, jsons_10K, iterations: iterSequential),
+        await RunTest(tests.SetGet_Sequential_WithJsonDeserialize, Target.StackOverflowRedis, jsons_10K, iterations: iterSequential),
+        
+        await RunTest(tests.SetGet_WhenEach, Target.Respsody, small_20K, iterations: itersConcurrent),
+        await RunTest(tests.SetGet_WhenEach, Target.StackOverflowRedis, small_20K, iterations: itersConcurrent),
+        
+        await RunTest(tests.OneSetTwoGets_WhenEach, Target.Respsody, small_20K, iterations: itersConcurrent),
+        await RunTest(tests.OneSetTwoGets_WhenEach, Target.StackOverflowRedis, small_20K, iterations: itersConcurrent),
+        
+        await RunTest(tests.SetGet_WhenEach_WithJsonDeserialize, Target.Respsody, jsons_10K, iterations: itersConcurrent),
+        await RunTest(tests.SetGet_WhenEach_WithJsonDeserialize, Target.StackOverflowRedis, jsons_10K, iterations: itersConcurrent),
+        
+        await RunTest(tests.SetGet_WhenEach_WithJsonSerializeDeserialize, Target.Respsody, srcJsons_10K, iterations: itersConcurrent), 
+        await RunTest(tests.SetGet_WhenEach_WithJsonSerializeDeserialize, Target.StackOverflowRedis, srcJsons_10K, iterations: itersConcurrent), 
+        
+        await RunTest(tests.OneSetTwoGets_WhenEach, Target.Respsody, large_300, iterations: itersConcurrent),
+        await RunTest(tests.OneSetTwoGets_WhenEach, Target.StackOverflowRedis, large_300, iterations: itersConcurrent),
 
-     await RunTest(tests.SetGet_WhenEach_WithJsonSerializeDeserialize, Target.Respsody, plainJsons_10K, iterations: itersConcurrent),
-     await RunTest(tests.SetGet_WhenEach_WithJsonSerializeDeserialize, Target.StackOverflowRedis, plainJsons_10K, iterations: itersConcurrent),
-    
-    await RunTest(tests.OneSetTwoGets_WhenEach, Target.Respsody, large_300, iterations: itersConcurrent),
-    await RunTest(tests.OneSetTwoGets_WhenEach, Target.StackOverflowRedis, large_300, iterations: itersConcurrent),
-    
-    await RunTest(tests.MSetGet, Target.Respsody, small_20K, iterations: itersConcurrent),
-    await RunTest(tests.MSetGet, Target.StackOverflowRedis, small_20K, iterations: itersConcurrent),
-    
-    await RunTest(tests.MSetGet, Target.Respsody, large_300, iterations: itersConcurrent),
-    await RunTest(tests.MSetGet, Target.StackOverflowRedis, large_300, iterations: itersConcurrent),
-    
-    await RunTest(tests.SetGet_WhenEach_Adapted, Target.Respsody, small_20K, iterations: itersConcurrent),
-    await RunTest(tests.SetGet_WhenEach_Adapted, Target.StackOverflowRedis, small_20K, iterations: itersConcurrent),
-];
-Console.WriteLine(BenchmarkResult.WriteTable(results));
+        await RunTest(tests.SetGet_WhenEach_Adapted, Target.Respsody, small_20K, iterations: itersConcurrent),
+        await RunTest(tests.SetGet_WhenEach_Adapted, Target.StackOverflowRedis, small_20K, iterations: itersConcurrent),
+
+        await RunTest(tests.MSetGet, Target.Respsody, small_20K, iterations: itersConcurrent),
+        await RunTest(tests.MSetGet, Target.StackOverflowRedis, small_20K, iterations: itersConcurrent),
+        
+        await RunTest(tests.MSetGet, Target.Respsody, large_300, iterations: itersConcurrent),
+        await RunTest(tests.MSetGet, Target.StackOverflowRedis, large_300, iterations: itersConcurrent)
+    ];
+}
+
+// Console.WriteLine("Dry run...");
+// await RunTests(iterSequential: 0, itersConcurrent: 0);
+// Console.Clear();
+
+Console.WriteLine("Actual run...");
+Console.WriteLine(BenchmarkResult.WriteTable(await RunTests(iterSequential: 50, itersConcurrent: 100)));
 
 return;
 
@@ -134,12 +142,19 @@ static async Task<BenchmarkResult> RunTest<T>(
     Console.WriteLine($"Dataset: {valuesExp}");
 
     const int warmUpIterations = 2;
-    Console.WriteLine("Warming up...");
+    Console.Write("Warming up...");
 
     for (var i = 0; i < warmUpIterations; i++)
+    {
+        var warmUpSw = Stopwatch.StartNew();
         await test(target, values);
+        Console.Write($"..{i+1} ({warmUpSw.Elapsed})");
+    }
 
-    await Task.Delay(TimeSpan.FromMilliseconds(100));
+    Console.WriteLine();
+
+    if (iterations == 0)
+        return null!;
 
     Console.WriteLine("Running...");
 
