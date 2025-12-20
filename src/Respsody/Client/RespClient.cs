@@ -71,6 +71,10 @@ public sealed class RespClient(
 
             _ = Task.Run(CheckExpiredMessages, CancellationToken.None);
         }
+        catch (TaskCanceledException tcs)
+        {
+            throw new TimeoutException($"Connection timed out after {connectionProcedure.Timeout}", tcs);
+        }
         finally
         {
             _initialConnectionLock.Release();
