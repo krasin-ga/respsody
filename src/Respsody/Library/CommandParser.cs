@@ -1,4 +1,5 @@
-﻿using Respsody.Memory;
+﻿using Respsody.Client;
+using Respsody.Memory;
 using Respsody.Resp;
 using Respsody.Resp.Parsing;
 
@@ -28,23 +29,26 @@ internal static class CommandParser
         }
 
         using var readyFrames = framing.Feed(block);
-        var agg = new RespFrameAggregationStrategy(new RespAggregatesPool());
-
+        var aggregationStrategy = new RespFrameAggregationStrategy(new RespAggregatesPool());
+        var disposalGuard = new DisposalGuard(new CompletionGuard(), checkOnly: true);
         foreach (var readyFrame in readyFrames)
         {
-            if (!agg.Aggregate(readyFrame, out var value))
+            if (!aggregationStrategy.Aggregate(readyFrame, out var value))
                 continue;
 
             if (value.Type != RespType.Array)
                 throw new InvalidOperationException("Command must be array of bulk strings");
 
-            using var array = value.Aggregate!.ToRespArray();
+            using var agg = value.Aggregate!;
+            var array = value.Aggregate!.ToRespArray(disposalGuard);
 
             if (array.Length <= 1)
                 throw new InvalidOperationException("Command must have arguments");
 
-            static Bytes Decode(in RespValueVariant valueVariant) =>
-                new(valueVariant.Simple!.Value.ToRespString().GetSpan().ToArray());
+            static Bytes Decode(in OwnedRespValueVariant valueVariant)
+            {
+                return new Bytes(valueVariant.ToRespString().GetSpan().ToArray());
+            }
 
             return array.ToArrayOf(Decode)[1..];
         }

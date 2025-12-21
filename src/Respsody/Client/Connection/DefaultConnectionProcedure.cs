@@ -35,29 +35,28 @@ public class DefaultConnectionProcedure(ConnectionOptions connectionOptions)
         using var socketRpc = new DirectSocketRpc(socket);
         var authOptions = connectionOptions.AuthOptions;
 
-        using var helloReply = (
-            await socketRpc.Rpc(
-                "HELLO",
-                c =>
+        using var helloReply = await socketRpc.Rpc(
+            "HELLO",
+            c =>
+            {
+                c.Arg(SupportedProtocolVersion);
+
+                if (authOptions is { } && !string.IsNullOrWhiteSpace(authOptions.Password))
                 {
-                    c.Arg(SupportedProtocolVersion);
+                    c.Token("AUTH");
+                    c.Arg(authOptions.UserName ?? "default");
+                    c.Arg(authOptions.Password);
+                }
 
-                    if (authOptions is { } && !string.IsNullOrWhiteSpace(authOptions.Password))
-                    {
-                        c.Token("AUTH");
-                        c.Arg(authOptions.UserName ?? "default");
-                        c.Arg(authOptions.Password);
-                    }
+                if (connectionOptions.ClientName is { } clientName)
+                {
+                    c.Token("SETNAME");
+                    c.Arg(clientName);
+                }
+            },
+            cts.Token);
 
-                    if (connectionOptions.ClientName is { } clientName)
-                    {
-                        c.Token("SETNAME");
-                        c.Arg(clientName);
-                    }
-                },
-                token)
-        ).ToRespMap();
-
-        return new ConnectedSocket(socket, new ConnectionMetadata(endPoint, helloReply.ToMapWithStringKey()));
+        var metadata = helloReply.Variant.ToRespMap().ToMapWithStringKey();
+        return new ConnectedSocket(socket, new ConnectionMetadata(endPoint, metadata));
     }
 }

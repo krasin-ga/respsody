@@ -2,7 +2,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
-using Respsody.Exceptions;
+using Respsody.Client;
 using Respsody.Memory;
 
 namespace Respsody.Resp;
@@ -13,46 +13,21 @@ public readonly struct RespString : IRespResponse
     private const int VerbatimOffset = FormatLength + 1;
 
     private readonly Frame<RespContext> _frame;
-    public readonly RespType RespType;
+    private readonly DisposalGuard _guard;
 
-    public RespString(Frame<RespContext> frame)
+    public RespString(Frame<RespContext> frame, DisposalGuard guard)
     {
         Debug.Assert(CanConvert(frame));
 
         _frame = frame;
-        RespType = frame.Context.Type;
+        _guard = guard;
     }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static async ValueTask<RespString> FromResponseTask(
-        ValueTask<RespResponse> responseTask)
-    {
-        var response = await responseTask;
-        try
-        {
-            if (response.Frame is not { } sliceMemory)
-                throw new RespUnexpectedResponseException(ResponseType.String, response);
-
-            return sliceMemory.ToRespString();
-        }
-        catch
-        {
-            response.Dispose();
-            throw;
-        }
-    }
-
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool CanConvert(Frame<RespContext> frame)
     {
         return frame.Context.Type is RespType.SimpleString or RespType.BulkString
             or RespType.BulkError or RespType.SimpleError or RespType.Null or RespType.VerbatimString;
-    }
-
-    public static RespString FromSlice(Frame<RespContext> frame)
-    {
-        return new RespString(frame);
     }
 
     public override string? ToString()
@@ -92,6 +67,8 @@ public readonly struct RespString : IRespResponse
 
     public ReadOnlySpan<byte> GetSpan()
     {
+        _guard.CheckDisposed();
+
         switch (_frame.GetRespType())
         {
             case RespType.SimpleString:
@@ -111,14 +88,15 @@ public readonly struct RespString : IRespResponse
 
     public void Dispose()
     {
-        _frame.Dispose();
+        if(_guard.TryDispose()) 
+            _frame.Dispose();
     }
 
     public (T, IDisposable) AsExternallyOwnedUnsafe<T>()
         where T : IRespResponse
     {
         var (frame, lifetime) = _frame.AsExternallyOwned();
-        var cloned = new RespString(frame);
+        var cloned = new RespString(frame, _guard.ToCheckOnly());
         return (Unsafe.As<RespString, T>(ref cloned), lifetime);
     }
 }

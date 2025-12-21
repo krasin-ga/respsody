@@ -1,138 +1,119 @@
-﻿using System.Runtime.CompilerServices;
+﻿using Respsody.Client;
 using Respsody.Memory;
+using System.Runtime.CompilerServices;
 
 namespace Respsody.Resp;
 
 public static class RespTypesExtensions
 {
-    public static RespString ToRespString(this in RespValueVariant variant)
+    public static RespString ToRespString(this in OwnedRespValueVariant ownedRespValueVariant)
     {
+        var variant = ownedRespValueVariant.Variant;
         if (variant.Simple is not { } simple || !RespString.CanConvert(simple))
             throw CreateConversionException(variant);
 
-        return new RespString(simple);
+        return new RespString(simple, ownedRespValueVariant.Guard);
     }
 
-
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static RespString ToRespString(this in Frame<RespContext> frame)
+    internal static RespString ToRespString(this in OwnedRespFrame ownedFrame)
     {
+        var frame = ownedFrame.Frame;
         if (!RespString.CanConvert(frame))
             throw CreateConversionException(frame);
 
-        return new RespString(frame);
+        return new RespString(frame, ownedFrame.Guard);
     }
 
-    public static RespDouble ToRespDouble(this in RespValueVariant variant)
+    public static RespDouble ToRespDouble(this in OwnedRespValueVariant ownedRespValueVariant)
     {
+        var variant = ownedRespValueVariant.Variant;
+
         if (variant.Simple is not { } simple || !RespDouble.CanConvert(simple))
             throw CreateConversionException(variant);
 
-        return new RespDouble(simple);
+        return new RespDouble(simple, ownedRespValueVariant.Guard);
     }
 
-    public static RespDouble ToRespDouble(this in Frame<RespContext> frame)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static RespDouble ToRespDouble(this in OwnedRespFrame ownedFrame)
     {
+        var frame = ownedFrame.Frame;
         if (!RespDouble.CanConvert(frame))
             throw CreateConversionException(frame);
 
-        return new RespDouble(frame);
+        return new RespDouble(frame, ownedFrame.Guard);
     }
 
-    public static RespNumber ToRespNumber(this in RespValueVariant variant)
+    public static RespNumber ToRespNumber(this in OwnedRespValueVariant ownedRespValueVariant)
     {
+        var variant = ownedRespValueVariant.Variant;
+
         if (variant.Simple is not { } simple || !RespNumber.CanConvert(simple))
             throw CreateConversionException(variant);
 
-        return new RespNumber(simple);
+        return new RespNumber(simple, ownedRespValueVariant.Guard);
     }
 
-    public static RespNumber ToRespNumber(this in Frame<RespContext> frame)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static RespNumber ToRespNumber(this in OwnedRespFrame ownedFrame)
     {
+        var frame = ownedFrame.Frame;
         if (!RespNumber.CanConvert(frame))
             throw CreateConversionException(frame);
 
-        return new RespNumber(frame);
+        return new RespNumber(frame, ownedFrame.Guard);
     }
 
-    public static RespBigNumber ToRespBigNumber(this in RespValueVariant variant)
+    public static RespBigNumber ToRespBigNumber(this in OwnedRespValueVariant ownedRespValueVariant)
     {
+        var variant = ownedRespValueVariant.Variant;
+
         if (variant.Simple is not { } simple || !RespBigNumber.CanConvert(simple))
             throw CreateConversionException(variant);
 
-        return new RespBigNumber(simple);
+        return new RespBigNumber(simple, ownedRespValueVariant.Guard);
     }
 
-    public static RespBigNumber ToRespBigNumber(this in Frame<RespContext> frame)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static RespBigNumber ToRespBigNumber(this in OwnedRespFrame ownedFrame)
     {
+        var frame = ownedFrame.Frame;
         if (!RespBigNumber.CanConvert(frame))
             throw CreateConversionException(frame);
 
-        return new RespBigNumber(frame);
+        return new RespBigNumber(frame, ownedFrame.Guard);
     }
 
-    public static RespArray ToRespArray(this in RespValueVariant variant)
+    public static RespArray ToRespArray(this in OwnedRespValueVariant ownedRespValueVariant)
     {
+        var variant = ownedRespValueVariant.Variant;
+
         if (variant.Aggregate is not { } agg || !RespArray.CanConvert(agg.HeaderFrame))
             throw CreateConversionException(variant);
 
-        return new RespArray(agg);
+        return new RespArray(agg, ownedRespValueVariant.Guard);
     }
 
-    public static RespArray ToRespArray(this RespAggregate slice)
+    public static RespMap ToRespMap(this in OwnedRespValueVariant ownedRespValueVariant)
     {
-        if (!RespArray.CanConvert(slice.HeaderFrame))
-            throw CreateConversionException(slice.HeaderFrame);
+        var variant = ownedRespValueVariant.Variant;
 
-        return new RespArray(slice);
-    }
-
-    public static RespMap ToRespMap(this in RespValueVariant variant)
-    {
         if (variant.Aggregate is not { } agg || !RespMap.CanConvert(agg.HeaderFrame))
             throw CreateConversionException(variant);
 
-        return new RespMap(agg);
+        return new RespMap(agg, ownedRespValueVariant.Guard);
     }
 
-    public static RespMap ToRespMap(this RespAggregate slice)
+
+    public static RespSet ToRespSet(this in OwnedRespValueVariant ownedRespValueVariant)
     {
-        if (!RespMap.CanConvert(slice.HeaderFrame))
-            throw CreateConversionException(slice.HeaderFrame);
+        var variant = ownedRespValueVariant.Variant;
 
-        return new RespMap(slice);
-    }
-
-    public static RespPush ToRespPush(this in RespValueVariant variant)
-    {
-        if (variant.Aggregate is not { } agg || !RespPush.CanConvert(agg.HeaderFrame))
-            throw CreateConversionException(variant);
-
-        return new RespPush(agg);
-    }
-
-    public static RespPush ToRespPush(this RespAggregate slice)
-    {
-        if (!RespPush.CanConvert(slice.HeaderFrame))
-            throw CreateConversionException(slice.HeaderFrame);
-
-        return new RespPush(slice);
-    }
-
-    public static RespSet ToRespSet(this in RespValueVariant variant)
-    {
         if (variant.Aggregate is not { } agg || !RespSet.CanConvert(agg.HeaderFrame))
             throw CreateConversionException(variant);
 
-        return new RespSet(agg);
-    }
-
-    public static RespSet ToRespSet(this RespAggregate slice)
-    {
-        if (!RespSet.CanConvert(slice.HeaderFrame))
-            throw CreateConversionException(slice.HeaderFrame);
-
-        return new RespSet(slice);
+        return new RespSet(agg, ownedRespValueVariant.Guard);
     }
 
     private static InvalidOperationException CreateConversionException(
@@ -151,46 +132,77 @@ public static class RespTypesExtensions
             $"Cannot execute {caller} because variant is {frame.ToDebugString()}");
     }
 
-    public static object? ToClrValue(this RespValueVariant valueVariant)
+    public static object? ToClrValue(this OwnedRespValueVariant ownedRespValueVariant)
     {
+        var valueVariant = ownedRespValueVariant.Variant;
+
         if (valueVariant.Simple.HasValue)
-            return valueVariant.Simple.Value.ToClrValue();
+            return valueVariant.Simple.Value.ToClrValue(ownedRespValueVariant.Guard);
 
         var aggregate = valueVariant.Aggregate;
         if (aggregate is null)
             return null;
 
-        static object? Decode(in RespValueVariant v) =>
-            v.ToClrValue();
+        static object? Decode(in OwnedRespValueVariant v)
+        {
+            return v.ToClrValue();
+        }
 
         switch (valueVariant.Type)
         {
             case RespType.Array:
-                return new RespArray(aggregate).ToArrayOf(Decode);
+                return new RespArray(aggregate, ownedRespValueVariant.Guard).ToArrayOf(Decode);
             case RespType.Map:
-                return new RespMap(aggregate).ToMapWithStringKey();
+                return new RespMap(aggregate, ownedRespValueVariant.Guard).ToMapWithStringKey();
             case RespType.Set:
-                return new RespSet(aggregate).ToHashSetOf(Decode);
+                return new RespSet(aggregate, ownedRespValueVariant.Guard).ToHashSetOf(Decode);
             default:
                 throw new ArgumentOutOfRangeException();
         }
     }
 
-    public static object? ToClrValue(this Frame<RespContext> memory)
+    public static object? ToClrValue(this Frame<RespContext> memory, DisposalGuard guard)
     {
         return memory.Context.Type switch
         {
             RespType.None => null,
-            RespType.Number => new RespNumber(memory).ToInt64(),
+            RespType.Number => new RespNumber(memory, guard.ToCheckOnly()).ToInt64(),
             RespType.Null => null,
-            RespType.Double => new RespDouble(memory).ToDouble(),
-            RespType.Boolean => new RespBoolean(memory).ToBool(),
-            RespType.BulkError or RespType.SimpleError => new Exception(new RespString(memory).ToString()),
-            RespType.VerbatimString or RespType.BulkString or RespType.SimpleString => new RespString(memory).ToString(),
-            RespType.BigNumber => new RespBigNumber(memory).ToBigInteger(),
-            RespType.Array or RespType.Map or RespType.Set or RespType.Attribute or RespType.Push or RespType.SteamedStringChunk or RespType.End
+            RespType.Double => new RespDouble(memory, guard.ToCheckOnly()).ToDouble(),
+            RespType.Boolean => new RespBoolean(memory, guard.ToCheckOnly()).ToBool(),
+            RespType.BulkError or RespType.SimpleError => new Exception(new RespString(memory, guard.ToCheckOnly())
+                .ToString()),
+            RespType.VerbatimString or RespType.BulkString or RespType.SimpleString => new RespString(memory,
+                guard.ToCheckOnly()).ToString(),
+            RespType.BigNumber => new RespBigNumber(memory, guard.ToCheckOnly()).ToBigInteger(),
+            RespType.Array or RespType.Map or RespType.Set or RespType.Attribute or RespType.Push
+                or RespType.SteamedStringChunk or RespType.End
                 => throw new ArgumentOutOfRangeException(),
             _ => throw new ArgumentOutOfRangeException()
         };
+    }
+
+    internal static RespArray ToRespArray(this RespAggregate slice, DisposalGuard guard)
+    {
+        if (!RespArray.CanConvert(slice.HeaderFrame))
+            throw CreateConversionException(slice.HeaderFrame);
+
+        return new RespArray(slice, guard.ToCheckOnly());
+    }
+
+    internal static RespMap ToRespMap(this RespAggregate slice, DisposalGuard guard)
+    {
+        if (!RespMap.CanConvert(slice.HeaderFrame))
+            throw CreateConversionException(slice.HeaderFrame);
+
+        return new RespMap(slice, guard.ToCheckOnly());
+    }
+
+    internal static RespPush ToRespPush(this RespAggregate slice, DisposalGuard guard)
+    {
+        if (!RespPush.CanConvert(slice.HeaderFrame))
+            throw CreateConversionException(slice.HeaderFrame);
+
+        return new RespPush(slice, guard);
     }
 }

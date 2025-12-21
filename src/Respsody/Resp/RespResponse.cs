@@ -1,26 +1,40 @@
 ﻿using System.Runtime.CompilerServices;
+using Respsody.Client;
 using Respsody.Library.Disposables;
 using Respsody.Memory;
 
 namespace Respsody.Resp;
 
-public readonly record struct RespResponse(
-    Frame<RespContext>? Frame,
-    RespAggregate? Aggregate,
-    RespAggregate? Attribute)
+public readonly struct RespResponse(
+    Frame<RespContext>? frame,
+    RespAggregate? aggregate,
+    RespAggregate? attribute,
+    DisposalGuard guard)
     : IRespResponse
 {
+    private RespValueVariant InternalVariant { get; } = frame.HasValue
+        ? new RespValueVariant(frame.Value)
+        : aggregate is not null
+            ? new RespValueVariant(aggregate)
+            : throw new InvalidOperationException();
+
+    public OwnedRespValueVariant Variant => new(InternalVariant, guard);
+
+    internal RespAggregate? Attribute { get; } = attribute;
+
     public void Dispose()
     {
-        Frame?.Dispose();
-        Aggregate?.Dispose();
+        if (!guard.TryDispose())
+            return;
+
+        InternalVariant.Dispose();
         Attribute?.Dispose();
     }
 
     public (T, IDisposable Liftime) AsExternallyOwnedUnsafe<T>() where T : IRespResponse
     {
         var disposable = new CompositeDisposable();
-        var frame = Frame;
+        var frame = InternalVariant.Simple;
         if (frame.HasValue)
         {
             var (ownedFrame, lifetime) = frame.Value.AsExternallyOwned();
@@ -28,28 +42,23 @@ public readonly record struct RespResponse(
             frame = ownedFrame;
         }
 
-        if (Aggregate is { })
-            disposable.Add(Aggregate.AsExternallyOwned());
+        if (InternalVariant.Aggregate is { } agg)
+            disposable.Add(agg.AsExternallyOwned());
 
         if (Attribute is { })
             disposable.Add(Attribute.AsExternallyOwned());
 
-        var ownedResponse = this with { Frame = frame };
+        var ownedResponse = new RespResponse(frame, InternalVariant.Aggregate, Attribute, guard.ToCheckOnly());
 
         return (Unsafe.As<RespResponse, T>(ref ownedResponse), disposable);
     }
 
     public string ToDebugString()
     {
-        if (Frame is { } frame)
-            return frame.ToDebugString();
+        var attributeDbgString = Attribute?.ToDebugString();
 
-        if (Aggregate is { } agg)
-            return agg.ToDebugString();
-
-        if (Attribute is { } att)
-            return att.ToDebugString();
-
-        return string.Empty;
+        return attributeDbgString == null 
+            ? InternalVariant.ToDebugString()
+            : $"{InternalVariant.ToDebugString()} [{attributeDbgString}]";
     }
 }

@@ -66,7 +66,7 @@ public class Tests(IDatabaseAsync db, IRespClient client)
             {
                 await client.Set(key, value);
                 using var val = await client.Get(key);
-                i += JsonSerializer.Deserialize<SampleJson>(val.GetSpan())!.VectorValue.Length;
+                i += JsonSerializer.Deserialize(val.GetSpan(), SampleJsonSerializerContext.Default.SampleJson)!.VectorValue.Length;
             }
             return (int)i;
         }
@@ -76,8 +76,8 @@ public class Tests(IDatabaseAsync db, IRespClient client)
         foreach (var (key, value) in seValues)
         {
             await db.StringSetAsync(key, value);
-            var res = await db.StringGetAsync(key);
-            j += JsonSerializer.Deserialize<SampleJson>(res!)!.VectorValue.Length;
+            var res = (ReadOnlyMemory<byte>)await db.StringGetAsync(key);
+            j += JsonSerializer.Deserialize(res.Span, SampleJsonSerializerContext.Default.SampleJson)!.VectorValue.Length;
         }
 
         return (int)j;
@@ -100,6 +100,7 @@ public class Tests(IDatabaseAsync db, IRespClient client)
                                        using var val2 = await client.Get(v.Key);
                                    })))
             {
+                CheckResult(res);
                 i++;
             }
 
@@ -119,6 +120,7 @@ public class Tests(IDatabaseAsync db, IRespClient client)
                                    await db.StringGetAsync(v.Key);
                                })))
         {
+            CheckResult(res);
             j++;
         }
 
@@ -140,9 +142,10 @@ public class Tests(IDatabaseAsync db, IRespClient client)
                                        await client.Set(v.Key, v.Value);
                                        using var val = await client.Get(v.Key);
 
-                                       i2 += JsonSerializer.Deserialize<SampleJson>(val.GetSpan())!.VectorValue.Length;
+                                       i2 += JsonSerializer.Deserialize(val.GetSpan(), SampleJsonSerializerContext.Default.SampleJson)!.VectorValue.Length;
                                    })))
             {
+                CheckResult(res);
                 i++;
             }
 
@@ -158,9 +161,63 @@ public class Tests(IDatabaseAsync db, IRespClient client)
                                async v =>
                                {
                                    await db.StringSetAsync(v.Key, v.Value);
-                                   j2 += JsonSerializer.Deserialize<SampleJson>((await db.StringGetAsync(v.Key))!)!.VectorValue.Length;
+                                   var stringGetAsync = (ReadOnlyMemory<byte>) await db.StringGetAsync(v.Key);
+                                   j2 += JsonSerializer.Deserialize(stringGetAsync.Span, SampleJsonSerializerContext.Default.SampleJson)!.VectorValue.Length;
                                })))
         {
+            CheckResult(res);
+            j++;
+        }
+
+        return j + j2;
+    }
+    
+    public async Task<int> SetGet_WhenEach_WithJsonSerializeDeserialize(Target target, SampleJson[] values)
+    {
+        if (target is Target.Respsody)
+        {
+            var i = 0;
+            var i2 = 0;
+
+            await foreach (var res in Task.WhenEach(
+                               values.SelectTaskRun(
+                                   async v =>
+                                   {
+                                       var key = Key.Utf8(v.StringValue);
+
+                                       await client.Set(key, new Value(JsonSerializer.SerializeToUtf8Bytes(v, SampleJsonSerializerContext.Default.SampleJson)));
+                                       using var val = await client.Get(key);
+
+                                       var deserialized = JsonSerializer.Deserialize(val.GetSpan(), SampleJsonSerializerContext.Default.SampleJson)!;
+                                       if (deserialized.StringValue != v.StringValue)
+                                           throw new InvalidOperationException();
+                                       i2 += deserialized.VectorValue.Length;
+                                   })))
+            {
+                CheckResult(res);
+                i++;
+            }
+
+            return i + i2;
+        }
+
+        var j = 0;
+        var j2 = 0;
+
+        await foreach (var res in Task.WhenEach(
+                           values.SelectTaskRun(
+                               async v =>
+                               {
+                                   await db.StringSetAsync(v.StringValue, JsonSerializer.SerializeToUtf8Bytes(v, SampleJsonSerializerContext.Default.SampleJson));
+                                   var stringGetAsync = (ReadOnlyMemory<byte>) await db.StringGetAsync(v.StringValue);
+                                   var deserialized = JsonSerializer.Deserialize(stringGetAsync.Span, SampleJsonSerializerContext.Default.SampleJson)!;
+
+                                   if (deserialized.StringValue != v.StringValue)
+                                       throw new InvalidOperationException();
+                                   j2 += deserialized.VectorValue.Length;
+                               })))
+        {
+            CheckResult(res);
             j++;
         }
 
@@ -182,6 +239,7 @@ public class Tests(IDatabaseAsync db, IRespClient client)
                                        using var val = await client.Get(v.Key);
                                    })))
             {
+                CheckResult(res);
                 i++;
             }
 
@@ -199,6 +257,7 @@ public class Tests(IDatabaseAsync db, IRespClient client)
                                    await db.StringGetAsync(v.Key);
                                })))
         {
+            CheckResult(res);
             j++;
         }
 
@@ -225,6 +284,7 @@ public class Tests(IDatabaseAsync db, IRespClient client)
                                        l += (int)seValue.Length();
                                    })))
             {
+                CheckResult(res);
                 i++;
             }
 
@@ -242,9 +302,19 @@ public class Tests(IDatabaseAsync db, IRespClient client)
                                    await db.StringGetAsync(v.Key);
                                })))
         {
+            CheckResult(res);
             j++;
         }
 
         return j;
+    }
+
+    private static void CheckResult(Task res)
+    {
+        if (res.IsFaulted)
+        {
+            Console.WriteLine(res.Exception);
+            Environment.FailFast("Test failed");
+        }
     }
 }

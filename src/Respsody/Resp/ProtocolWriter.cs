@@ -1,15 +1,19 @@
-﻿using System.Buffers.Text;
+﻿using Respsody.Library;
+using Respsody.Memory;
+using System;
+using System.Buffers.Text;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
-using Respsody.Library;
-using Respsody.Memory;
 
 namespace Respsody.Resp;
 
 public static class ProtocolWriter
 {
-    private const int MaxPrefixBytes = 11 + 1 + 2;
+    // 1  - *
+    // 10 - 0000000000
+    // 2  - \r\n 
+    private const int MaxPrefixBytes = 1 + 10 + 2;
 
     public static byte[] ConvertToBulkString(string str)
     {
@@ -67,15 +71,53 @@ public static class ProtocolWriter
     }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    public static void WriteBulkString<T>(
+    public static void WriteBulkStringBuffered<T>(
         this OutgoingBuffer outgoingBuffer,
-        int lengthInBytes,
         in T obj,
-        WriteToSpan<T> writeToSpan)
+        WriteToBuffer<T> writeToBuffer)
     {
-        outgoingBuffer.WriteBulkStringPrefix(lengthInBytes);
-        outgoingBuffer.Write(lengthInBytes, obj, writeToSpan);
-        outgoingBuffer.Write(Constants.CRLF);
+        var prefix = outgoingBuffer.WriteZeroFilledMaxBulkStringPrefix();
+
+        var bufferWriter = outgoingBuffer.GetBufferWriter();
+        writeToBuffer(obj, bufferWriter);
+
+        var bytes = bufferWriter.GetWrittenBytes();
+
+        if (bytes <= 0)
+            throw new InvalidOperationException();
+
+        var neededDigits = (int)Math.Floor(Math.Log10(bytes) + 1);
+        prefix = prefix[(10 - neededDigits)..];
+        if (!Utf8Formatter.TryFormat(bytes, prefix, out _))
+            throw new InvalidOperationException();
+
+        outgoingBuffer.WriteCrLf();
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void WriteBulkStringBuffered(
+        this OutgoingBuffer outgoingBuffer,
+        IWritableValue writeToBuffer)
+    {
+        var prefix = outgoingBuffer.WriteZeroFilledMaxBulkStringPrefix();
+
+        var bufferWriter = outgoingBuffer.GetBufferWriter();
+        writeToBuffer.WriteToBuffer(bufferWriter);
+
+        var bytes = bufferWriter.GetWrittenBytes();
+
+        if (bytes == 0)
+        {
+            outgoingBuffer.WriteCrLf();
+            return;
+        }
+
+        var digits = (int)Math.Floor(Math.Log10(bytes) + 1);
+        prefix = prefix[(10 - digits)..];
+        if (!Utf8Formatter.TryFormat(bytes, prefix, out _))
+            throw new InvalidOperationException($"Can't fit {bytes} into {Encoding.UTF8.GetString(prefix)}");
+
+        outgoingBuffer.WriteCrLf();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
@@ -121,6 +163,21 @@ public static class ProtocolWriter
         WriteCrlf(bytes, bytesWritten + 1);
 
         outgoingBuffer.Write(bytes[..(bytesWritten + 1 + 2)]);
+    }
+
+    //$0000000000\r\n
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Span<byte> WriteZeroFilledMaxBulkStringPrefix(this OutgoingBuffer outgoingBuffer)
+    {
+        var memoryBlock = outgoingBuffer.GetCurrentBlock();
+        if (memoryBlock.Remaining < MaxPrefixBytes)
+            memoryBlock = outgoingBuffer.ExtendToFitContiguous(MaxPrefixBytes);
+        
+        var writableSpan = memoryBlock.GetWritableSpan();
+        "$0000000000\r\n"u8.CopyTo(writableSpan);
+        memoryBlock.Advance(MaxPrefixBytes);
+
+       return writableSpan[1..11];
     }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]

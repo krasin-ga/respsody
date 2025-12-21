@@ -26,7 +26,7 @@ public class RedisSingleNodeFixture : IAsyncLifetime
         await _network.CreateAsync();
 
         _container = new ContainerBuilder()
-            .WithImage("redis:6.2")
+            .WithImage("redis:7.4.7")
             .WithName($"redis-node-{Port}")
             .WithNetwork(_network.Name)
             .WithNetworkAliases($"redis-node-{Port}")

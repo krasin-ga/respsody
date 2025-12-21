@@ -80,7 +80,7 @@ public sealed class MemoryBlock : IDisposable
     [ExcludeFromCodeCoverage]
     public string ToDebugString()
     {
-        return $"({_bufferSize / (double)Written:P1})" + Encoding.UTF8.GetString(GetWrittenMemory().Span);
+        return $"({(double)Written / _bufferSize:P1})" + Encoding.UTF8.GetString(GetWrittenMemory().Span);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

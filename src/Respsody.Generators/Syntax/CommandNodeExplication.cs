@@ -89,7 +89,7 @@ internal class CommandNodeExplication(CommandSyntaxNode command)
                             [.. explication],
                             examinationStack.Clone()));
 
-                foreach (var childNode in variationsOfChildren[0].Reverse())
+                foreach (var childNode in variationsOfChildren[0].AsEnumerable().Reverse())
                     examinationStack.Push(childNode);
             }
 

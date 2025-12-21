@@ -1,36 +1,31 @@
-﻿using System.Runtime.CompilerServices;
-using Respsody.Exceptions;
+﻿using System.Collections;
+using System.Runtime.CompilerServices;
+using Respsody.Client;
 using Respsody.Memory;
 
 namespace Respsody.Resp;
 
-public readonly struct RespArray(RespAggregate respAggregate) : IRespResponse
+public readonly struct RespArray(RespAggregate respAggregate, DisposalGuard guard) : IRespResponse
 {
     public int Length { get; } = respAggregate.Length - 1;
 
-    public RespValueVariant this[int i] =>
-        respAggregate[i + 1];
+    public OwnedRespValueVariant this[int i] => new(respAggregate[i + 1], guard);
 
-    public static async ValueTask<RespArray> FromResponseTask(
-        ValueTask<RespResponse> responseTask)
+    public Enumerator<RespString> EnumerateStrings()
     {
-        var response = await responseTask;
-        try
-        {
-            if (response.Aggregate is not { } slicedRespAggregate)
-                throw new RespUnexpectedResponseException(ResponseType.Array, response);
+        return new Enumerator<RespString>(respAggregate, variant => variant.ToRespString(), guard);
+    }
 
-            return slicedRespAggregate.ToRespArray();
-        }
-        catch
-        {
-            response.Dispose();
-            throw;
-        }
+    public Enumerator<T> Enumerate<T>(Func<OwnedRespValueVariant, T> convert)
+        where T : IRespResponse
+    {
+        return new Enumerator<T>(respAggregate, convert, guard);
     }
 
     public T[] ToArrayOf<T>(IRespCodec codec)
     {
+        guard.CheckDisposed();
+
         var array = new T[Length];
         for (var i = 0; i < Length; i++)
             array[i] = codec.Decode<T>(this[i]);
@@ -40,6 +35,8 @@ public readonly struct RespArray(RespAggregate respAggregate) : IRespResponse
 
     public T[] ToArrayOf<T>(Decode<T> decode)
     {
+        guard.CheckDisposed();
+
         var array = new T[Length];
         for (var i = 0; i < Length; i++)
             array[i] = decode(this[i]);
@@ -49,7 +46,8 @@ public readonly struct RespArray(RespAggregate respAggregate) : IRespResponse
 
     public void Dispose()
     {
-        respAggregate.Dispose();
+        if (guard.TryDispose())
+            respAggregate.Dispose();
     }
 
     public (T, IDisposable) AsExternallyOwnedUnsafe<T>()
@@ -63,5 +61,34 @@ public readonly struct RespArray(RespAggregate respAggregate) : IRespResponse
     public static bool CanConvert(Frame<RespContext> frame)
     {
         return frame.GetRespType() is RespType.Array;
+    }
+
+    public struct Enumerator<T>(RespAggregate data, Func<OwnedRespValueVariant, T> convert, DisposalGuard guard) : IEnumerator<T>
+    {
+        private int _index = -1;
+        private T _current = default!;
+
+        public bool MoveNext()
+        {
+            if (++_index >= data.Length)
+                return false;
+
+            _current = convert(new OwnedRespValueVariant(data[_index], guard));
+            return true;
+        }
+
+        public readonly T Current => _current;
+
+        readonly object IEnumerator.Current => Current!;
+
+        public void Reset()
+        {
+            _index = -1;
+            _current = default!;
+        }
+
+        public readonly void Dispose()
+        {
+        }
     }
 }

@@ -29,8 +29,10 @@ public sealed class RespClient(
     private RespAggregate? _attribute;
     private GCHandle? _handlersHandle;
     private StructuredSocket<RespContext, Payload>? _structuredSocket;
+    private readonly DisposalGuard _dummyGuard = new(new CompletionGuard(), checkOnly: true);
     public ConnectionMetadata? Metadata { get; private set; }
     public IReadOnlyDictionary<string, string?> ConnectionConfig => connectionProcedure.Config;
+
 
     internal async Task Connect()
     {
@@ -40,7 +42,7 @@ public sealed class RespClient(
 
         await _initialConnectionLock.WaitAsync(cts.Token);
 
-        if (_structuredSocket is { })
+        if (_structuredSocket is not null)
         {
             _initialConnectionLock.Release();
             return;
@@ -68,6 +70,10 @@ public sealed class RespClient(
             await _structuredSocket.Connected.WaitAsync(cts.Token);
 
             _ = Task.Run(CheckExpiredMessages, CancellationToken.None);
+        }
+        catch (TaskCanceledException tcs)
+        {
+            throw new TimeoutException($"Connection timed out after {connectionProcedure.Timeout}", tcs);
         }
         finally
         {
@@ -148,7 +154,8 @@ public sealed class RespClient(
         return taskCompletionSource.AsValueTask();
     }
 
-    public ComboCommand<T> Pack<T>(Combo combo, Command<T> command, CancellationToken token = default) where T : IRespResponse
+    public ComboCommand<T> Pack<T>(Combo combo, Command<T> command, CancellationToken token = default)
+        where T : IRespResponse
     {
         if (_structuredSocket?.IsDisposed is true)
         {
@@ -209,6 +216,7 @@ public sealed class RespClient(
         var ticks = Environment.TickCount;
 
         using (readyFrames)
+        {
             foreach (var sliceMemory in readyFrames)
             {
                 if (!_respFrameAggregationStrategy.Aggregate(
@@ -225,6 +233,7 @@ public sealed class RespClient(
                 if (variant.Aggregate is { } aggregate)
                     HandleAggregate(aggregate, ticks);
             }
+        }
     }
 
     private void HandleAggregate(RespAggregate aggregate, int ticks)
@@ -237,15 +246,16 @@ public sealed class RespClient(
 
         if (aggregate.HeaderFrame.Context.Type == RespType.Push)
         {
-            var respPush = new RespPush(aggregate);
-            if (respPush.TryGetSubscription(out var data))
+            if (aggregate.ToRespPush(_dummyGuard).TryGetSubscription(out var data))
             {
                 var idx = 0;
                 foreach (var confirmation in _subUnSubConfirmationsQueue)
                 {
-                    if (confirmation.Handle(data.Command, data.Ack) is var res && res != SubUnSub.HandleResult.Unhandled)
+                    if (confirmation.Handle(data.Command, data.Ack) is var res &&
+                        res != SubUnSub.HandleResult.Unhandled)
                     {
-                        if (_responseQueue.TryPeek(out var peeked) && peeked.IsSubscription(confirmation.Command, confirmation.Acks))
+                        if (_responseQueue.TryPeek(out var peeked) &&
+                            peeked.IsSubscription(confirmation.Command, confirmation.Acks))
                             _responseQueue.TryDequeue(out _);
 
                         if (idx == 0 && res == SubUnSub.HandleResult.Completed)
@@ -256,10 +266,11 @@ public sealed class RespClient(
                     idx++;
                 }
 
+                aggregate.Dispose();
                 return;
             }
 
-            _pushReceiver.Receive(respPush);
+            _pushReceiver.Receive(new RespPush(aggregate, new CompletionGuard()));
             return;
         }
 
@@ -269,12 +280,12 @@ public sealed class RespClient(
         var attribute = _attribute;
         _attribute = null;
 
-        payload.Complete(new RespResponse(Frame: null, aggregate, attribute), ticks);
+        payload.Complete(aggregate, ticks, attribute);
     }
 
     private void HandleSimpleResponse(Frame<RespContext> frame, int ticks)
     {
-        if (!_responseQueue.TryDequeue(out var requestData))
+        if (!_responseQueue.TryDequeue(out var payload))
             Panic("[handle simple response] failed to dequeue response for completion");
 
         var attribute = _attribute;
@@ -282,13 +293,13 @@ public sealed class RespClient(
 
         if (frame.Context.Type is RespType.BulkError or RespType.SimpleError)
         {
-            using var errorString = new RespString(frame);
+            using var errorString = new RespString(frame, payload.Guard);
             var exception = new RespErrorResponseException(errorString.ToString(Encoding.UTF8) ?? "NULL");
-            requestData.CompleteWithException(exception, ticks);
+            payload.CompleteWithException(exception, ticks);
             return;
         }
 
-        requestData.Complete(new RespResponse(Frame: frame, null, attribute), ticks);
+        payload.Complete(frame, ticks, attribute);
     }
 
     public void OnDisconnected(Exception? exception, int generation)
@@ -302,7 +313,8 @@ public sealed class RespClient(
             if (!_responseQueue.TryDequeue(out _))
                 Panic("[on disconnected] failed to dequeue response for completion with error");
 
-            response.CompleteWithException(exception ?? new RespConnectionLostException(), ticks: Environment.TickCount);
+            response.CompleteWithException(exception ?? new RespConnectionLostException(),
+                ticks: Environment.TickCount);
         }
 
         while (_subUnSubConfirmationsQueue.TryPeek(out var sub) && sub.ConnectionGeneration <= generation)
@@ -314,7 +326,8 @@ public sealed class RespClient(
         }
     }
 
-    public async ValueTask InitializeConnection(ConnectedSocket connectedSocket, int generation, CancellationToken cancellationToken)
+    public async ValueTask InitializeConnection(ConnectedSocket connectedSocket, int generation,
+        CancellationToken cancellationToken)
     {
         Metadata = connectedSocket.Metadata;
         foreach (var initialization in options.ConnectionInitializations)
@@ -371,7 +384,8 @@ public sealed class RespClient(
         : IPayload
     {
         public int ConnectionGeneration { get; private set; }
-        private readonly CompletionToken _ct = new();
+        public CompletionGuard Guard => _ct;
+        private readonly CompletionGuard _ct = new();
 
         public bool OnAboutToWrite(int socketId, int ticks)
         {
@@ -403,7 +417,8 @@ public sealed class RespClient(
             ConnectionGeneration = socketId;
             respClient._responseQueue.Enqueue(this);
             if (responseType == ResponseType.Subscription)
-                respClient._subUnSubConfirmationsQueue.Enqueue(new SubUnSub(command, subAcks!, socketId, taskCompletionSource, _ct));
+                respClient._subUnSubConfirmationsQueue.Enqueue(new SubUnSub(command, subAcks!, socketId,
+                    taskCompletionSource, _ct));
 
             return true;
         }
@@ -414,7 +429,8 @@ public sealed class RespClient(
             if (elapsed > timeout)
             {
                 InternalCompleteWithException(
-                    new TimeoutException($"The command expired before receiving a response. Timeout={timeout}ms, Elapsed={elapsed}ms")
+                    new TimeoutException(
+                        $"The command expired before receiving a response. Timeout={timeout}ms, Elapsed={elapsed}ms")
                 );
 
                 respClient._clientHandler?.OnCommandTimedOut(respClient, elapsed, command);
@@ -449,7 +465,7 @@ public sealed class RespClient(
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void CompleteWithException(Exception exception, int ticks)
         {
-            if (_ct?.CanComplete() is false)
+            if (_ct?.TryComplete() is false)
                 return;
 
             taskCompletionSource.SetException(exception);
@@ -459,15 +475,15 @@ public sealed class RespClient(
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void InternalCompleteWithException(Exception exception)
         {
-            if (_ct?.CanComplete() is false)
+            if (_ct?.TryComplete() is false)
                 return;
 
             taskCompletionSource.SetException(exception);
         }
 
-        public void Complete(RespResponse response, int ticks)
+        public void Complete(RespAggregate aggregate, int ticks, RespAggregate? attribute)
         {
-            if (_ct?.CanComplete() is false)
+            if (_ct?.TryComplete() is false)
                 return;
 
             respClient._clientHandler?.OnCommandExecuted(respClient, ticks - startTicks, command);
@@ -475,35 +491,94 @@ public sealed class RespClient(
             switch (responseType)
             {
                 case ResponseType.String:
-                    CompleteStringResponse(response);
-                    break;
                 case ResponseType.Boolean:
-                    CompleteBooleanResponse(response);
-                    break;
                 case ResponseType.Double:
-                    CompleteDoubleResponse(response);
-                    break;
                 case ResponseType.Number:
-                    CompleteNumberResponse(response);
-                    break;
                 case ResponseType.BigNumber:
-                    CompleteBigNumberResponse(response);
+                    taskCompletionSource.SetException(new RespUnexpectedResponseException(responseType, aggregate));
+                    aggregate.Dispose();
+                    attribute?.Dispose();
                     break;
                 case ResponseType.Array:
-                    CompleteArrayResponse(response);
+                    CompleteArrayResponse(aggregate);
+                    attribute?.Dispose();
                     break;
                 case ResponseType.Map:
-                    CompleteMapResponse(response);
+                    CompleteMapResponse(aggregate);
+                    attribute?.Dispose();
                     break;
                 case ResponseType.Set:
-                    CompleteSetResponse(response);
+                    CompleteSetResponse(aggregate);
+                    attribute?.Dispose();
                     break;
                 case ResponseType.Untyped:
-                    taskCompletionSource.SetResult(response);
+                    taskCompletionSource.SetResult(
+                        new RespResponse(
+                            frame: null,
+                            aggregate: aggregate,
+                            attribute: attribute,
+                            guard: Guard
+                        ));
                     break;
                 case ResponseType.Void:
                     taskCompletionSource.SetResult(new RespVoid());
-                    response.Dispose();
+                    aggregate.Dispose();
+                    attribute?.Dispose();
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException();
+            }
+        }
+
+        public void Complete(Frame<RespContext> frame, int ticks, RespAggregate? attribute)
+        {
+            if (_ct?.TryComplete() is false)
+                return;
+
+            respClient._clientHandler?.OnCommandExecuted(respClient, ticks - startTicks, command);
+
+            switch (responseType)
+            {
+                case ResponseType.String:
+                    CompleteStringResponse(frame);
+                    attribute?.Dispose();
+                    break;
+                case ResponseType.Boolean:
+                    CompleteBooleanResponse(frame);
+                    attribute?.Dispose();
+                    break;
+                case ResponseType.Double:
+                    CompleteDoubleResponse(frame);
+                    attribute?.Dispose();
+                    break;
+                case ResponseType.Number:
+                    CompleteNumberResponse(frame);
+                    attribute?.Dispose();
+                    break;
+                case ResponseType.BigNumber:
+                    CompleteBigNumberResponse(frame);
+                    attribute?.Dispose();
+                    break;
+                case ResponseType.Array:
+                case ResponseType.Map:
+                case ResponseType.Set:
+                    taskCompletionSource.SetException(new RespUnexpectedResponseException(responseType, frame));
+                    frame.Dispose();
+                    attribute?.Dispose();
+                    break;
+                case ResponseType.Untyped:
+                    taskCompletionSource.SetResult(
+                        new RespResponse(
+                            frame: frame,
+                            aggregate: null,
+                            attribute: attribute,
+                            guard: Guard
+                        ));
+                    break;
+                case ResponseType.Void:
+                    taskCompletionSource.SetResult(new RespVoid());
+                    frame.Dispose();
+                    attribute?.Dispose();
                     break;
                 default:
                     throw new ArgumentOutOfRangeException();
@@ -511,99 +586,107 @@ public sealed class RespClient(
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void CompleteSetResponse(RespResponse response)
+        private void CompleteSetResponse(RespAggregate aggregate)
         {
-            if (response.Aggregate is not { } aggregate || !RespSet.CanConvert(aggregate.HeaderFrame))
+            if (!RespSet.CanConvert(aggregate.HeaderFrame))
             {
-                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.Set, response));
+                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.Set, aggregate));
+                aggregate.Dispose();
                 return;
             }
 
-            taskCompletionSource.SetResult(new RespSet(aggregate));
+            taskCompletionSource.SetResult(new RespSet(aggregate, _ct));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void CompleteArrayResponse(RespResponse response)
+        private void CompleteArrayResponse(RespAggregate aggregate)
         {
-            if (response.Aggregate is not { } aggregate || !RespArray.CanConvert(aggregate.HeaderFrame))
+            if (!RespArray.CanConvert(aggregate.HeaderFrame))
             {
-                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.Array, response));
+                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.Array, aggregate));
+                aggregate.Dispose();
                 return;
             }
 
-            taskCompletionSource.SetResult(new RespArray(aggregate));
+            taskCompletionSource.SetResult(new RespArray(aggregate, _ct));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void CompleteMapResponse(RespResponse response)
+        private void CompleteMapResponse(RespAggregate aggregate)
         {
-            if (response.Aggregate is not { } aggregate || !RespMap.CanConvert(aggregate.HeaderFrame))
+            if (!RespMap.CanConvert(aggregate.HeaderFrame))
             {
-                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.Map, response));
+                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.Map, aggregate));
+                aggregate.Dispose();
                 return;
             }
 
-            taskCompletionSource.SetResult(new RespMap(aggregate));
+            taskCompletionSource.SetResult(new RespMap(aggregate, _ct));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void CompleteStringResponse(RespResponse response)
+        private void CompleteStringResponse(Frame<RespContext> frame)
         {
-            if (response.Frame is not { } sliceMemory || !RespString.CanConvert(sliceMemory))
+            if (!RespString.CanConvert(frame))
             {
-                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.String, response));
+                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.String, frame));
+                frame.Dispose();
                 return;
             }
 
-            taskCompletionSource.SetResult(new RespString(sliceMemory));
+            taskCompletionSource.SetResult(new RespString(frame, _ct));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void CompleteNumberResponse(RespResponse response)
+        private void CompleteNumberResponse(Frame<RespContext> frame)
         {
-            if (response.Frame is not { } sliceMemory || !RespNumber.CanConvert(sliceMemory))
+            if (!RespNumber.CanConvert(frame))
             {
-                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.Number, response));
+                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.Number, frame));
+                frame.Dispose();
                 return;
             }
 
-            taskCompletionSource.SetResult(new RespNumber(sliceMemory));
+            taskCompletionSource.SetResult(new RespNumber(frame, _ct));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void CompleteBigNumberResponse(RespResponse response)
+        private void CompleteBigNumberResponse(Frame<RespContext> frame)
         {
-            if (response.Frame is not { } sliceMemory || !RespBigNumber.CanConvert(sliceMemory))
+            if (!RespBigNumber.CanConvert(frame))
             {
-                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.BigNumber, response));
+                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.BigNumber, frame));
+                frame.Dispose();
                 return;
             }
 
-            taskCompletionSource.SetResult(new RespBigNumber(sliceMemory));
+            taskCompletionSource.SetResult(new RespBigNumber(frame, _ct));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void CompleteDoubleResponse(RespResponse response)
+        private void CompleteDoubleResponse(Frame<RespContext> frame)
         {
-            if (response.Frame is not { } sliceMemory || !RespDouble.CanConvert(sliceMemory))
+            if (!RespDouble.CanConvert(frame))
             {
-                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.Double, response));
+                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.Double, frame));
+                frame.Dispose();
                 return;
             }
 
-            taskCompletionSource.SetResult(new RespDouble(sliceMemory));
+            taskCompletionSource.SetResult(new RespDouble(frame, _ct));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void CompleteBooleanResponse(RespResponse response)
+        private void CompleteBooleanResponse(Frame<RespContext> frame)
         {
-            if (response.Frame is not { } sliceMemory || !RespBoolean.CanConvert(sliceMemory))
+            if (!RespBoolean.CanConvert(frame))
             {
-                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.Boolean, response));
+                taskCompletionSource.SetException(new RespUnexpectedResponseException(ResponseType.Boolean, frame));
+                frame.Dispose();
                 return;
             }
 
-            taskCompletionSource.SetResult(new RespBoolean(sliceMemory));
+            taskCompletionSource.SetResult(new RespBoolean(frame, _ct));
         }
 
         internal bool IsSubscription(string cmd, Bytes[] acks)
@@ -619,7 +702,7 @@ public sealed class RespClient(
         Bytes[] acks,
         int connectionGeneration,
         ITaskCompletionSource taskCompletionSource,
-        CompletionToken ct)
+        CompletionGuard ct)
     {
         public enum HandleResult
         {
@@ -647,7 +730,7 @@ public sealed class RespClient(
                 ? HandleResult.Completed
                 : HandleResult.Handled;
 
-            if (result == HandleResult.Completed && ct.CanComplete())
+            if (result == HandleResult.Completed && ct.TryComplete())
                 taskCompletionSource.SetResult(new RespSubscriptionAck(Acks));
 
             return result;
@@ -655,18 +738,8 @@ public sealed class RespClient(
 
         public void CompleteWithException(Exception exception)
         {
-            if (ct.CanComplete())
+            if (ct.TryComplete())
                 taskCompletionSource.SetException(exception);
-        }
-    }
-
-    private class CompletionToken
-    {
-        private int _isCompleted;
-
-        public bool CanComplete()
-        {
-            return Interlocked.CompareExchange(ref _isCompleted, 1, 0) == 0;
         }
     }
 }

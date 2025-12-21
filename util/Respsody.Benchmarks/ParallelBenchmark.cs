@@ -98,7 +98,7 @@ public class ParallelBenchmark
         async Task Exec()
         {
             var json = await _stackExchangeDb.StringGetAsync("json");
-            JsonSerializer.Deserialize(json!, SourceGenerationContext.Default.TestJsonObj);
+            JsonSerializer.Deserialize(((ReadOnlyMemory<byte>)json!).Span, SourceGenerationContext.Default.TestJsonObj);
         }
     }
 }

@@ -11,14 +11,18 @@ public sealed class RespAggregatesPool
 
     public RespAggregate Lease()
     {
-        if (_queue.TryDequeue(out var block))
-            return block;
+        if (_queue.TryDequeue(out var agg))
+        {
+            agg.TakenFromPool();
+            return agg;
+        }
 
         return new RespAggregate(this);
     }
 
     public void Return(RespAggregate aggregate)
     {
+        aggregate.ReturnedToPool();
         _queue.Enqueue(aggregate);
     }
 }

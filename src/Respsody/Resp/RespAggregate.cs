@@ -10,6 +10,7 @@ public sealed class RespAggregate : IDisposable
     private readonly Lifetime _lifetime;
     private readonly CompositeDisposable _owned = new();
     private bool _ownedExternally;
+    private bool _takenFromPool = true;
     private List<RespValueVariant> Elements { get; } = new(16);
 
     public int Length => Elements.Count;
@@ -75,22 +76,39 @@ public sealed class RespAggregate : IDisposable
     {
         const int limit = 20;
         if (Elements.Count > limit)
-            return string.Join(", ", Elements.Take(limit / 20).Select(s => s.ToDebugString()))
+            return string.Join(", ", Elements.Take(limit / 2).Select(s => s.ToDebugString()))
                    + " ... "
                    + string.Join(", ", Elements.Skip(Elements.Count - limit / 2).Select(s => s.ToDebugString()));
 
         return string.Join(", ", Elements.Select(s => s.ToDebugString()));
     }
 
-    private class Lifetime(RespAggregatesPool pool, RespAggregate parent) : IDisposable
+    private class Lifetime(RespAggregatesPool pool, RespAggregate agg) : IDisposable
     {
         public void Dispose()
         {
-            parent.HeaderFrame = default;
-            parent._owned.Dispose();
-            parent.Elements.Clear();
-            parent._ownedExternally = false;
-            pool.Return(parent);
+            agg.HeaderFrame = default;
+            agg._owned.Dispose();
+            agg.Elements.Clear();
+            agg._ownedExternally = false;
+        
+            pool.Return(agg);
         }
+    }
+    
+    internal void TakenFromPool()
+    {
+        if (_takenFromPool)
+            throw new InvalidOperationException($"Double take of RespAggregate");
+
+        _takenFromPool = true;
+    }
+
+    internal void ReturnedToPool()
+    {
+        if (!_takenFromPool)
+            throw new InvalidOperationException($"Double disposal of RespAggregate");
+
+        _takenFromPool = false;
     }
 }

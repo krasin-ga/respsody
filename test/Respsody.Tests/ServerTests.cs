@@ -1,10 +1,12 @@
 ﻿using System;
 using System.Linq;
+using System.Net;
 using System.Text;
 using System.Threading.Tasks;
 using Respsody.Client.Connection;
 using Respsody.Client.Connection.Options;
 using Respsody.Client.Options;
+using Respsody.Resp;
 using Respsody.Tests.Library;
 using Xunit;
 using Xunit.Abstractions;
@@ -81,10 +83,10 @@ public class ServerTests(GarnetFixture fixture, ITestOutputHelper @out) : IClass
                 Handler = new TestHandler(
                     output: @out,
                     onConnected: (_, _) =>
-                                 {
-                                     wasConnected = true;
-                                     return ValueTask.CompletedTask;
-                                 },
+                    {
+                        wasConnected = true;
+                        return ValueTask.CompletedTask;
+                    },
                     onDisconnected: (_, _, gen) => wasDisconnected = gen > 0)
             },
             new DefaultConnectionProcedure(new ConnectionOptions { Endpoint = garnet.EndPoint.ToString() }));

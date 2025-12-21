@@ -28,7 +28,7 @@ public sealed class DirectSocketRpc: IDisposable
         _frameAggregationStrategy = new RespFrameAggregationStrategy(new RespAggregatesPool());
     }
 
-    public async Task<RespValueVariant> Rpc(string command, Action<Command<RespResponse>> commandBuilder, CancellationToken token)
+    public async Task<RespResponse> Rpc(string command, Action<Command<RespResponse>> commandBuilder, CancellationToken token)
     {
         await _semaphoreSlim.WaitAsync(token);
 
@@ -42,7 +42,7 @@ public sealed class DirectSocketRpc: IDisposable
         }
     }
 
-    private async Task<RespValueVariant> ExecuteRpc(string command, Action<Command<RespResponse>> commandBuilder, CancellationToken token)
+    private async Task<RespResponse> ExecuteRpc(string command, Action<Command<RespResponse>> commandBuilder, CancellationToken token)
     {
         using var cmd = Command<RespResponse>.GetCommand().Init(_blocks, Size1K, command, clusterMode: false, @unsafe: false);
         commandBuilder(cmd);
@@ -78,7 +78,11 @@ public sealed class DirectSocketRpc: IDisposable
                     continue;
 
                 cmd.OutgoingBuffer.FreeByDeliveryPipeline();
-                return variant;
+                return new RespResponse(
+                    variant.Simple, 
+                    variant.Aggregate, 
+                    attribute:null, 
+                    new DisposalGuard(new CompletionGuard(), checkOnly:false));
             }
         }
 

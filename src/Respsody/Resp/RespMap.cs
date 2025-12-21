@@ -1,32 +1,14 @@
 ﻿using System.Runtime.CompilerServices;
-using Respsody.Exceptions;
+using Respsody.Client;
 using Respsody.Memory;
 
 namespace Respsody.Resp;
 
-public readonly struct RespMap(RespAggregate respAggregate) : IRespResponse
+public readonly struct RespMap(RespAggregate respAggregate, DisposalGuard guard) : IRespResponse
 {
     public int Length { get; } = (respAggregate.Length - 1) / 2;
 
-    public static async ValueTask<RespMap> FromResponseTask(
-        ValueTask<RespResponse> responseTask)
-    {
-        var response = await responseTask;
-        try
-        {
-            if (response.Aggregate is not { } slicedRespAggregate)
-                throw new RespUnexpectedResponseException(ResponseType.Map, response);
-
-            return slicedRespAggregate.ToRespMap();
-        }
-        catch
-        {
-            response.Dispose();
-            throw;
-        }
-    }
-
-    public IReadOnlyDictionary<TKey, object?> ToMapOf<TKey>(DecodeSlice<TKey> decode)
+    public IReadOnlyDictionary<TKey, object?> ToMapOf<TKey>(DecodeFrame<TKey> decode)
         where TKey : notnull
     {
         var length = respAggregate.Length;
@@ -37,7 +19,8 @@ public readonly struct RespMap(RespAggregate respAggregate) : IRespResponse
             if (key.Simple is null)
                 throw new InvalidOperationException("Expected key not to be a collection");
 
-            dictionary[decode(key.Simple.Value)] = respAggregate[i + 1].ToClrValue();
+            dictionary[decode(new OwnedRespFrame(key.Simple.Value, guard))]
+                = new OwnedRespValueVariant(respAggregate[i + 1], guard).ToClrValue();
         }
 
         return dictionary;
@@ -45,14 +28,14 @@ public readonly struct RespMap(RespAggregate respAggregate) : IRespResponse
 
     public IReadOnlyDictionary<string, object?> ToMapWithStringKey()
     {
-        return ToMapOf(
-            static (in Frame<RespContext> slice)
-                => slice.ToRespString().ToString()!);
+        return ToMapOf(static (in OwnedRespFrame slice)
+            => slice.ToRespString().ToString()!);
     }
 
     public void Dispose()
     {
-        respAggregate.Dispose();
+        if (guard.TryDispose())
+            respAggregate.Dispose();
     }
 
     public (T, IDisposable) AsExternallyOwnedUnsafe<T>()

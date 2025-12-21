@@ -1,0 +1,22 @@
+<Solution>
+  <Folder Name="/doc/">
+    <File Path="assets/NugetReadme.md" />
+    <File Path="Readme.md" />
+    <File Path="THIRD-PARTY-NOTICES.md" />
+  </Folder>
+  <Folder Name="/Solution Items/">
+    <File Path="Directory.Build.props" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Respsody.Generators/Respsody.Generators.csproj" />
+    <Project Path="src/Respsody/Respsody.csproj" />
+  </Folder>
+  <Folder Name="/test/">
+    <Project Path="test/Respsody.Tests/Respsody.Tests.csproj" />
+  </Folder>
+  <Folder Name="/util/">
+    <Project Path="util/Respsody.Benchmarks.NonScientific/Respsody.Benchmarks.NonScientific.csproj" />
+    <Project Path="util/Respsody.Benchmarks/Respsody.Benchmarks.csproj" />
+    <Project Path="util/Respsody.Util.Playground/Respsody.Util.Playground.csproj" />
+  </Folder>
+</Solution>

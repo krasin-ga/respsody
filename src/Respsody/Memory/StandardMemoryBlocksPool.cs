@@ -1,23 +1,28 @@
 ﻿using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 
 namespace Respsody.Memory;
 
-public class StandardMemoryBlocksPool : IMemoryBlocksPool
+public class StandardMemoryBlocksPool(long memoryLimitInBytes = 512 * 1024 * 1024) : IMemoryBlocksPool
 {
-    private readonly ConcurrentStack<MemoryBlock>[] _pools = [.. A000079.Select(_ => new ConcurrentStack<MemoryBlock>())];
+    private readonly InnerPool[] _pools = [.. A000079.Select(_ => new InnerPool())];
 
     private static int[] A000079 =>
     [
-        0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576,
+        0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288,
+        1048576,
         2097152, 4194304, 8388608, 16777216, 33554432, 67108864, 134217728, 268435456, 536870912
     ];
 
+    private long _accumulatedBytes;
+
     public (MemoryBlock Block, bool IsNewlyCreated) Lease(int blockSize)
     {
-        var stack = GetPool(blockSize);
-        if (stack.TryPop(out var block))
+        var pool = GetPool(blockSize);
+        if (pool.TryPop(out var block))
         {
+            Interlocked.Add(ref _accumulatedBytes, -block.Size);
             return (block, IsNewlyCreated: false);
         }
 
@@ -26,7 +31,7 @@ public class StandardMemoryBlocksPool : IMemoryBlocksPool
         return (block, IsNewlyCreated: true);
     }
 
-    private ConcurrentStack<MemoryBlock> GetPool(int blockSize)
+    private InnerPool GetPool(int blockSize)
     {
         const int minBlockSizeIdx = 7; // 64 bytes
         var index = BitOperations.RoundUpToPowerOf2((uint)blockSize) switch
@@ -69,6 +74,27 @@ public class StandardMemoryBlocksPool : IMemoryBlocksPool
 
     public void Return(MemoryBlock memoryBlock)
     {
+        if (Interlocked.Add(ref _accumulatedBytes, memoryBlock.Size) >= memoryLimitInBytes)
+        {
+            Interlocked.Add(ref _accumulatedBytes, -_accumulatedBytes);
+            return;
+        }
+
         GetPool(memoryBlock.Size).Push(memoryBlock);
+    }
+
+    private class InnerPool()
+    {
+        private readonly ConcurrentStack<MemoryBlock> _stack = [];
+
+        public bool TryPop([NotNullWhen(true)] out MemoryBlock? o)
+        {
+            return _stack.TryPop(out o);
+        }
+
+        public void Push(MemoryBlock memoryBlock)
+        {
+            _stack.Push(memoryBlock);
+        }
     }
 }

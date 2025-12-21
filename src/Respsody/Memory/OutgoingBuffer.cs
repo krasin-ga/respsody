@@ -38,6 +38,12 @@ public sealed class OutgoingBuffer
         _bufferWriterAdapter = new BufferWriterAdapter(this);
     }
 
+    internal BufferWriterAdapter GetBufferWriter()
+    {
+        _bufferWriterAdapter.ResetStartPosition();
+        return _bufferWriterAdapter;
+    }
+
     internal void Commit()
     {
         if (_leases != 1)
@@ -94,6 +100,11 @@ public sealed class OutgoingBuffer
         _capturedBlock = _threadLocalBlock;
 
         return _current;
+    }
+
+    internal MemoryBlock ExtendToFitContiguous(int bytesToFit)
+    {
+        return Extend(Math.Max(bytesToFit, _blockSize));
     }
 
     private void AddSegment()
@@ -361,9 +372,12 @@ public sealed class OutgoingBuffer
         public MemoryBlock GetBlock()
         {
             if (!_isCommited)
+            {
+                _threadLocalBlock = null;
                 throw new InvalidOperationException(
                     "The command write operation was interrupted before completion. " +
                     "The thread must complete writing the current command before creating a new one.");
+            }
 
             _isCommited = false;
 
@@ -457,11 +471,19 @@ public sealed class OutgoingBuffer
         }
     }
 
-    public class BufferWriterAdapter(OutgoingBuffer p): IBufferWriter<byte>
+    internal sealed class BufferWriterAdapter(OutgoingBuffer p): IBufferWriter<byte>
     {
+        private int _position;
+
+        public void ResetStartPosition()
+        {
+            _position = 0;
+        }
+
         public void Advance(int count)
         {
             p.GetCurrentBlock().Advance(count);
+            _position += count;
         }
 
         public Memory<byte> GetMemory(int sizeHint = 0)
@@ -469,7 +491,7 @@ public sealed class OutgoingBuffer
             var block = p.GetCurrentBlock();
             return block.Remaining >= sizeHint
                 ? block.GetWritableMemory()
-                : p.Extend(sizeHint).GetWritableMemory();
+                : p.Extend(Math.Max(p._blockSize, sizeHint)).GetWritableMemory();
         }
 
         public Span<byte> GetSpan(int sizeHint = 0)
@@ -477,7 +499,9 @@ public sealed class OutgoingBuffer
             var block = p.GetCurrentBlock();
             return block.Remaining >= sizeHint 
                 ? block.GetWritableSpan() 
-                : p.Extend(sizeHint).GetWritableSpan();
+                : p.Extend(Math.Max(p._blockSize, sizeHint)).GetWritableSpan();
         }
+
+        public int GetWrittenBytes() => _position;
     }
 }

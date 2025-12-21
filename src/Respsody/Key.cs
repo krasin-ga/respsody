@@ -152,4 +152,8 @@ public readonly struct Key
 
     public static Key Unicode(string str) => new(str, Encoding.Unicode);
     public static Key Utf8(string str) => new(str, Encoding.UTF8);
+    public static Key Memory(ReadOnlyMemory<byte> memory) => new(memory);
+    public static Key ByteArray(byte[] memory) => new(memory);
+
+    public static implicit operator Key(string str) => new(str, Encoding.UTF8);
 }

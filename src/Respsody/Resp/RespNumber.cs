@@ -1,6 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Runtime.CompilerServices;
-using Respsody.Exceptions;
+using Respsody.Client;
 using Respsody.Memory;
 
 namespace Respsody.Resp;
@@ -8,34 +8,20 @@ namespace Respsody.Resp;
 public readonly struct RespNumber : IRespResponse
 {
     private readonly Frame<RespContext> _frame;
+    private readonly DisposalGuard _guard;
 
-    public RespNumber(Frame<RespContext> frame)
+    public RespNumber(Frame<RespContext> frame, DisposalGuard guard)
     {
         Debug.Assert(CanConvert(frame));
 
         _frame = frame;
-    }
-
-    public static async ValueTask<RespNumber> FromResponseTask(
-        ValueTask<RespResponse> responseTask)
-    {
-        var response = await responseTask;
-        try
-        {
-            if (response.Frame is not { } sliceMemory)
-                throw new RespUnexpectedResponseException(ResponseType.Number, response);
-
-            return sliceMemory.ToRespNumber();
-        }
-        catch
-        {
-            response.Dispose();
-            throw;
-        }
+        _guard = guard;
     }
 
     public long ToInt64()
     {
+        _guard.CheckDisposed();
+
         var span = _frame.Span[1..^2];
 
         var sign = 1;
@@ -59,14 +45,15 @@ public readonly struct RespNumber : IRespResponse
 
     public void Dispose()
     {
-        _frame.Dispose();
+        if(_guard.TryDispose())
+            _frame.Dispose();
     }
 
     public (T, IDisposable) AsExternallyOwnedUnsafe<T>()
         where T : IRespResponse
     {
         var (frame, lifetime) = _frame.AsExternallyOwned();
-        var cloned = new RespNumber(frame);
+        var cloned = new RespNumber(frame, _guard.ToCheckOnly());
         return (Unsafe.As<RespNumber, T>(ref cloned), lifetime);
     }
     public static bool CanConvert(in Frame<RespContext> frame)
