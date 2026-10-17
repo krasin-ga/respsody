@@ -546,7 +546,11 @@ public sealed class RespClient(
         public void Complete(Frame<RespContext> frame, int ticks, RespAggregate? attribute)
         {
             if (_ct?.TryComplete() is false)
+            {
+                frame.Dispose();
+                attribute?.Dispose();
                 return;
+            }
 
             respClient._clientHandler?.OnCommandExecuted(respClient, ticks - startTicks, command, _ctx);
 
