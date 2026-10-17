@@ -316,6 +316,7 @@ public sealed class RespClient(
 
         if (frame.Context.Type is RespType.BulkError or RespType.SimpleError)
         {
+            attribute?.Dispose();
             using var errorString = new RespString(frame, payload.Guard);
             var exception = new RespErrorResponseException(errorString.ToString(Encoding.UTF8) ?? "NULL");
             payload.CompleteWithException(exception, ticks);
@@ -330,6 +331,8 @@ public sealed class RespClient(
         _clientHandler?.OnDisconnected(this, exception, generation);
 
         _respFrameAggregationStrategy.Reset();
+        _attribute?.Dispose();
+        _attribute = null;
 
         while (_responseQueue.TryPeek(out var response) && response.ConnectionGeneration <= generation)
         {
