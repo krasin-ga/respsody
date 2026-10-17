@@ -25,6 +25,32 @@ namespace Respsody.Tests;
 public class SubscriptionLifecycleTests
 {
     [Fact]
+    public async Task DuplicateChannelsRequireOneAcknowledgementPerArgument()
+    {
+        using var client = new RespClient(new RespClientOptions(), new DefaultConnectionProcedure(new ConnectionOptions()));
+        using var framing = new RespFraming(new MemoryBlocks(), 128);
+        var firstSource = PooledValueTaskCompletionSource<RespSubscriptionAck>.Create(true);
+        var first = firstSource.AsValueTask();
+        var secondSource = PooledValueTaskCompletionSource<RespSubscriptionAck>.Create(true);
+        var second = secondSource.AsValueTask();
+        Assert.True(SubscriptionPayload(client, firstSource, ["alpha", "alpha"]).OnAboutToWrite(1, Environment.TickCount));
+        Assert.True(SubscriptionPayload(client, secondSource, ["alpha"]).OnAboutToWrite(1, Environment.TickCount));
+
+        Feed(client, framing, Ack("alpha"));
+        Assert.False(first.IsCompleted);
+        Assert.False(second.IsCompleted);
+        Feed(client, framing, Ack("alpha"));
+        Assert.True(first.IsCompletedSuccessfully);
+        Assert.False(second.IsCompleted);
+        using var firstAck = await first;
+        Assert.Equal(2, firstAck.Acks.Length);
+        Feed(client, framing, Ack("alpha"));
+        Assert.True(second.IsCompletedSuccessfully);
+        using var secondAck = await second;
+        Assert.Single(secondAck.Acks);
+    }
+
+    [Fact]
     public async Task PreCanceledSubscriptionIsNotSentAndNextReplyStaysAligned()
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));

@@ -827,7 +827,7 @@ public sealed class RespClient(
             Completed
         }
 
-        private readonly HashSet<Bytes> _remainingAcks = [.. acks];
+        private readonly Dictionary<Bytes, int> _remainingAcks = CountAcknowledgements(acks);
         public string Command => command;
         public Bytes[] Acks => acks;
         public int ConnectionGeneration => connectionGeneration;
@@ -839,8 +839,13 @@ public sealed class RespClient(
             if (_remainingAcks.Count == 0 || !string.Equals(Command, commandName, StringComparison.OrdinalIgnoreCase))
                 return HandleResult.Unhandled;
 
-            if (!_remainingAcks.Remove(data))
+            if (!_remainingAcks.TryGetValue(data, out var remaining))
                 return HandleResult.Unhandled;
+
+            if (remaining == 1)
+                _remainingAcks.Remove(data);
+            else
+                _remainingAcks[data] = remaining - 1;
 
             var result = _remainingAcks.Count == 0
                 ? HandleResult.Completed
@@ -856,6 +861,14 @@ public sealed class RespClient(
         {
             if (ct.TryComplete())
                 taskCompletionSource.SetException(exception);
+        }
+
+        private static Dictionary<Bytes, int> CountAcknowledgements(Bytes[] expected)
+        {
+            var counts = new Dictionary<Bytes, int>(expected.Length);
+            foreach (var acknowledgement in expected)
+                CollectionsMarshal.GetValueRefOrAddDefault(counts, acknowledgement, out _)++;
+            return counts;
         }
     }
 }
