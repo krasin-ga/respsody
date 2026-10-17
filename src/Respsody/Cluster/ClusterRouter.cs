@@ -427,14 +427,17 @@ public sealed class ClusterRouter : IDisposable
                 if (endpointClient is null)
                     throw;
 
-                var elapsed = Stopwatch.GetElapsedTime(startingTimestamp);
-                command.WithTimeout(command.Timeout - elapsed.Milliseconds);
+                var elapsedMilliseconds = (long)Math.Ceiling(Stopwatch.GetElapsedTime(startingTimestamp).TotalMilliseconds);
+                var remainingTimeout = command.Timeout - elapsedMilliseconds;
+                if (remainingTimeout <= 0)
+                    throw new TimeoutException("The command timeout elapsed before redirection.");
+                command.WithTimeout((int)remainingTimeout);
 
                 if (!withAsking)
                     return await endpointClient.ExecuteCommand(command, cancellationToken);
 
                 var combo = new Combo(endpointClient, command.Timeout);
-                using var asking = endpointClient.CreateCommand<RespVoid>("ASKING");
+                using var asking = endpointClient.CreateCommand<RespVoid>("ASKING").WithTimeout(command.Timeout);
                 endpointClient.Pack(combo, asking, cancellationToken);
                 var commandResponse = endpointClient.Pack(combo, command, cancellationToken);
                 combo.Execute();
