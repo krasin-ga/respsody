@@ -20,7 +20,7 @@ public sealed class PooledValueTaskCompletionSource<TResult> : IValueTaskSource<
     public void OnCompleted(Action<object?> continuation, object? state, short token, ValueTaskSourceOnCompletedFlags flags)
         => _core.OnCompleted(continuation, state, token, flags);
 
-    public void Reset()
+    private void Reset()
     {
         _core.Reset();
         ThreadStaticPool<PooledValueTaskCompletionSource<TResult>>.Return(this);

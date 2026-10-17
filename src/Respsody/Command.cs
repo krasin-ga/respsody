@@ -20,6 +20,7 @@ public sealed class Command<T> : IDisposable
 
     private int _owners;
     private bool _unsafe;
+
     public string? CommandName { get; private set; }
     public int Timeout { get; private set; } = int.MaxValue;
     public OutgoingBuffer OutgoingBuffer { get; private set; } = null!;

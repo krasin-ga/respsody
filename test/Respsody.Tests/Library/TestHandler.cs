@@ -76,26 +76,31 @@ public class TestHandler(
         onMemoryBlockResurrected?.Invoke(blockSize);
     }
 
-    public void OnCommandExecuted(IRespClient client, int elapsedTimeInMs, string command)
+    public object? CreateCommandContext(IRespClient client, string command)
+    {
+        return null;
+    }
+
+    public void OnCommandExecuted(IRespClient client, int elapsedTimeInMs, string command, object? ctx)
     {
         if(logCommandExecuted)
             Log($"[CmdExecuted] {command} ({elapsedTimeInMs} ms)");
         onCommandExecuted?.Invoke(client, elapsedTimeInMs, command);
     }
 
-    public void OnCommandFailed(IRespClient client, int elapsedTimeInMs, string command)
+    public void OnCommandFailed(IRespClient client, int elapsedTimeInMs, string command, object? ctx)
     {
         Log($"[CmdFailed]   {command} ({elapsedTimeInMs} ms)");
         onCommandFailed?.Invoke(client, elapsedTimeInMs, command);
     }
 
-    public void OnCommandTimedOut(IRespClient client, int elapsedTimeInMs, string command)
+    public void OnCommandTimedOut(IRespClient client, int elapsedTimeInMs, string command, object? ctx)
     {
         Log($"[CmdTimeout]  {command} ({elapsedTimeInMs} ms)");
         onCommandTimedOut?.Invoke(client, elapsedTimeInMs, command);
     }
 
-    public void OnCommandCancelled(IRespClient client, int elapsedTimeInMs, string command)
+    public void OnCommandCancelled(IRespClient client, int elapsedTimeInMs, string command, object? ctx)
     {
         Log($"[CmdCancel]   {command} ({elapsedTimeInMs} ms)");
         onCommandCancelled?.Invoke(client, elapsedTimeInMs, command);

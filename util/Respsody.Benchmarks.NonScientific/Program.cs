@@ -121,7 +121,7 @@ async Task<BenchmarkResult[]> RunTests(int iterSequential, int itersConcurrent)
 // Console.Clear();
 
 Console.WriteLine("Actual run...");
-Console.WriteLine(BenchmarkResult.WriteTable(await RunTests(iterSequential: 50, itersConcurrent: 100)));
+Console.WriteLine(BenchmarkResult.WriteTable(await RunTests(iterSequential: 2, itersConcurrent: 10)));
 
 return;
 

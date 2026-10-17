@@ -51,7 +51,7 @@ public sealed class OutgoingBuffer
 
         AddSegment();
 
-        //one for command, one structured socket
+        //one for command, one for structured socket
         _leases = 2;
         _capturedBlock.Commit();
     }
@@ -91,7 +91,6 @@ public sealed class OutgoingBuffer
     private MemoryBlock Extend(int blockSize)
     {
         AddSegment();
-        _prefixOffset = 0;
         _threadLocalBlock!.Refill(blockSize);
 
         _currentBlockOffset = 0;

@@ -40,22 +40,31 @@ public interface IRespClientHandler
     void OnMemoryBlockResurrected(int blockSize);
 
     /// <summary>
+    /// Creates a context object associated with a command before it is executed.
+    /// </summary>
+    /// <returns>
+    /// A user-defined context object that will be passed to completion callbacks,
+    /// or <c>null</c> if no context is required.
+    /// </returns>
+    object? CreateCommandContext(IRespClient client, string command);
+
+    /// <summary>
     /// Called when command successfully executed (response received)
     /// </summary>
-    void OnCommandExecuted(IRespClient client, int elapsedTimeInMs, string command);
+    void OnCommandExecuted(IRespClient client, int elapsedTimeInMs, string command, object? ctx);
 
     /// <summary>
     /// Called when command execution fails
     /// </summary>
-    void OnCommandFailed(IRespClient client, int elapsedTimeInMs, string command);
+    void OnCommandFailed(IRespClient client, int elapsedTimeInMs, string command, object? ctx);
 
     /// <summary>
     /// Called when command time-outs
     /// </summary>
-    void OnCommandTimedOut(IRespClient client, int elapsedTimeInMs, string command);
+    void OnCommandTimedOut(IRespClient client, int elapsedTimeInMs, string command, object? ctx);
 
     /// <summary>
     /// Called when command cancelled
     /// </summary>
-    void OnCommandCancelled(IRespClient client, int elapsedTimeInMs, string command);
+    void OnCommandCancelled(IRespClient client, int elapsedTimeInMs, string command, object? ctx);
 }

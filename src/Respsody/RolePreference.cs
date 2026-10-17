@@ -1,4 +1,4 @@
-﻿namespace Respsody.Cluster;
+﻿namespace Respsody;
 
 public enum RolePreference
 {

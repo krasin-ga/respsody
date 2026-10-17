@@ -3,6 +3,26 @@ using System.Diagnostics.CodeAnalysis;
 
 namespace Respsody.Library;
 
+/// <summary>
+/// A high-performance, thread-local object pool optimized for low-allocation,
+/// high-throughput scenarios. Each thread works with its own small local buffer
+/// ("clip") of objects to minimize contention.
+/// 
+/// Global concurrent queues are used to exchange clips between threads when a
+/// thread exhausts its local objects or fills its local buffer. This allows:
+/// - Reuse of object batches across threads
+/// - Load balancing between busy and idle threads
+/// - Avoidance of per-object synchronization
+/// 
+/// Instead of synchronizing on every Get/Return operation, threads only
+/// coordinate when a clip becomes completely empty or completely full,
+/// significantly reducing contention.
+/// </summary>
+/// <remarks>
+/// <para>
+/// This pool does NOT reset object state automatically or guarantee object affinity to the original thread.
+/// </para>
+/// </remarks>
 public static class ThreadStaticPool<T>
     where T : new()
 {

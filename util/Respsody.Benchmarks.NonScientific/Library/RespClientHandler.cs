@@ -39,19 +39,24 @@ public class RespClientHandler : IRespClientHandler
         Console.WriteLine($"Threads={ThreadPool.ThreadCount} | {Environment.CurrentManagedThreadId} | RESURRECTED {blockSize}");
     }
 
-    public void OnCommandExecuted(IRespClient client, int elapsedTimeInMs, string command)
+    public object? CreateCommandContext(IRespClient client, string command)
+    {
+        return null;
+    }
+
+    public void OnCommandExecuted(IRespClient client, int elapsedTimeInMs, string command, object? ctx)
     {
     }
 
-    public void OnCommandFailed(IRespClient client, int elapsedTimeInMs, string command)
+    public void OnCommandFailed(IRespClient client, int elapsedTimeInMs, string command, object? ctx)
     {
     }
 
-    public void OnCommandTimedOut(IRespClient client, int elapsedTimeInMs, string command)
+    public void OnCommandTimedOut(IRespClient client, int elapsedTimeInMs, string command, object? ctx)
     {
     }
 
-    public void OnCommandCancelled(IRespClient client, int elapsedTimeInMs, string command)
+    public void OnCommandCancelled(IRespClient client, int elapsedTimeInMs, string command, object? ctx)
     {
     }
 }

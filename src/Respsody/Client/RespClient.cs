@@ -33,8 +33,10 @@ public sealed class RespClient(
     public ConnectionMetadata? Metadata { get; private set; }
     public IReadOnlyDictionary<string, string?> ConnectionConfig => connectionProcedure.Config;
 
-
-    internal async Task Connect()
+    /// <summary>
+    /// Explicitly starts the connection and waits up to <see cref="IConnectionProcedure.Timeout"/> for it to complete.
+    /// </summary>
+    public async Task Start()
     {
         using var cts = new CancellationTokenSource();
         if (connectionProcedure.Timeout > TimeSpan.Zero)
@@ -45,6 +47,8 @@ public sealed class RespClient(
         if (_structuredSocket is not null)
         {
             _initialConnectionLock.Release();
+
+            await _structuredSocket.Connected.WaitAsync(cts.Token);
             return;
         }
 
@@ -66,10 +70,10 @@ public sealed class RespClient(
                     ),
                     GCHandleType.Normal);
             _structuredSocket.Start();
+            _ = Task.Run(CheckExpiredMessages, CancellationToken.None);
 
             await _structuredSocket.Connected.WaitAsync(cts.Token);
 
-            _ = Task.Run(CheckExpiredMessages, CancellationToken.None);
         }
         catch (TaskCanceledException tcs)
         {
@@ -203,11 +207,12 @@ public sealed class RespClient(
         CancellationToken cancellationToken)
         where TResponse : IRespResponse
     {
+        using var commandOwnership = command.WithOwnership();
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         if (command.Timeout > 0)
             linkedCts.CancelAfter(command.Timeout);
 
-        await Connect().WaitAsync(linkedCts.Token);
+        await Start().WaitAsync(linkedCts.Token);
         return await ExecuteCommand(command, linkedCts.Token);
     }
 
@@ -386,6 +391,7 @@ public sealed class RespClient(
         public int ConnectionGeneration { get; private set; }
         public CompletionGuard Guard => _ct;
         private readonly CompletionGuard _ct = new();
+        private readonly object? _ctx = respClient._clientHandler?.CreateCommandContext(respClient, command);
 
         public bool OnAboutToWrite(int socketId, int ticks)
         {
@@ -398,7 +404,7 @@ public sealed class RespClient(
                         $" Elapsed: {TimeSpan.FromTicks(elapsed)}" +
                         $" Timeout: {timeout}"));
 
-                respClient._clientHandler?.OnCommandTimedOut(respClient, elapsed, command);
+                respClient._clientHandler?.OnCommandTimedOut(respClient, elapsed, command, _ctx);
 
                 return false;
             }
@@ -408,17 +414,20 @@ public sealed class RespClient(
                 InternalCompleteWithException(
                     new OperationCanceledException("Command was cancelled before being sent to the server"));
 
-                respClient._clientHandler?.OnCommandCancelled(respClient, elapsed, command);
+                respClient._clientHandler?.OnCommandCancelled(respClient, elapsed, command, _ctx);
 
                 return false;
             }
 
             //mutate before copying 
             ConnectionGeneration = socketId;
-            respClient._responseQueue.Enqueue(this);
+            var payload = this;
+            respClient._responseQueue.Enqueue(payload);
             if (responseType == ResponseType.Subscription)
-                respClient._subUnSubConfirmationsQueue.Enqueue(new SubUnSub(command, subAcks!, socketId,
-                    taskCompletionSource, _ct));
+                respClient._subUnSubConfirmationsQueue.Enqueue(new SubUnSub(command, subAcks!, socketId, taskCompletionSource, _ct));
+
+            // cancellationToken.Register(() =>
+            //     payload.CompleteWithException(new OperationCanceledException("The command was cancelled"), Environment.TickCount));
 
             return true;
         }
@@ -433,7 +442,7 @@ public sealed class RespClient(
                         $"The command expired before receiving a response. Timeout={timeout}ms, Elapsed={elapsed}ms")
                 );
 
-                respClient._clientHandler?.OnCommandTimedOut(respClient, elapsed, command);
+                respClient._clientHandler?.OnCommandTimedOut(respClient, elapsed, command, _ctx);
 
                 return true;
             }
@@ -444,7 +453,7 @@ public sealed class RespClient(
                     new OperationCanceledException("The command was canceled before receiving a response")
                 );
 
-                respClient._clientHandler?.OnCommandCancelled(respClient, elapsed, command);
+                respClient._clientHandler?.OnCommandCancelled(respClient, elapsed, command, _ctx);
 
                 return true;
             }
@@ -459,7 +468,7 @@ public sealed class RespClient(
                 ticks
             );
 
-            respClient._clientHandler?.OnCommandCancelled(respClient, ticks - startTicks, command);
+            respClient._clientHandler?.OnCommandCancelled(respClient, ticks - startTicks, command, _ctx);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -469,7 +478,7 @@ public sealed class RespClient(
                 return;
 
             taskCompletionSource.SetException(exception);
-            respClient._clientHandler?.OnCommandFailed(respClient, ticks - startTicks, command);
+            respClient._clientHandler?.OnCommandFailed(respClient, ticks - startTicks, command, _ctx);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -484,9 +493,13 @@ public sealed class RespClient(
         public void Complete(RespAggregate aggregate, int ticks, RespAggregate? attribute)
         {
             if (_ct?.TryComplete() is false)
+            {
+                aggregate.Dispose();
+                attribute?.Dispose();
                 return;
+            }
 
-            respClient._clientHandler?.OnCommandExecuted(respClient, ticks - startTicks, command);
+            respClient._clientHandler?.OnCommandExecuted(respClient, ticks - startTicks, command, _ctx);
 
             switch (responseType)
             {
@@ -535,7 +548,7 @@ public sealed class RespClient(
             if (_ct?.TryComplete() is false)
                 return;
 
-            respClient._clientHandler?.OnCommandExecuted(respClient, ticks - startTicks, command);
+            respClient._clientHandler?.OnCommandExecuted(respClient, ticks - startTicks, command, _ctx);
 
             switch (responseType)
             {

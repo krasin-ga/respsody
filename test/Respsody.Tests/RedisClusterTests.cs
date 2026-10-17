@@ -11,7 +11,7 @@ using Respsody.Cluster.Options;
 using Respsody.Tests.Library;
 using Xunit;
 using Xunit.Abstractions;
-using static Respsody.Cluster.RolePreference;
+using static Respsody.RolePreference;
 using static Respsody.Tests.CLUSTER;
 
 namespace Respsody.Tests;

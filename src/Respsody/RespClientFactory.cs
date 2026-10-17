@@ -15,7 +15,7 @@ public class RespClientFactory
     {
         var redisClient = new RespClient(options, connectionProcedure);
 
-        await redisClient.Connect();
+        await redisClient.Start();
 
         return redisClient;
     }
@@ -27,7 +27,7 @@ public class RespClientFactory
             new DefaultConnectionProcedure(new ConnectionOptions { Endpoint = endPoint.ToString()! })
         );
 
-        await respClient.Connect();
+        await respClient.Start();
 
         return respClient;
     }

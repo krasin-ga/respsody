@@ -114,7 +114,7 @@ public sealed class ClusterRouter : IDisposable
 
         if (updated && _state is { Nodes.Count: > 0 })
         {
-            _ = Task.WhenAll(_state.Nodes.Select(n => n.Client.Connect()));
+            _ = Task.WhenAll(_state.Nodes.Select(n => n.Client.Start()));
             _options.ClusterRouterHandler?.OnClusterStateSynced(this, _state);
 
             return (true, exceptions ?? []);
@@ -130,7 +130,7 @@ public sealed class ClusterRouter : IDisposable
         var currentState = _state;
 
         var client = CreateClient(seedEndpoint);
-        await client.Connect();
+        await client.Start();
 
         var connectionMetadata = new ClusterNodeConnectionMetadata(client.Metadata!);
         if (!connectionMetadata.ServerMode.IsCluster)
