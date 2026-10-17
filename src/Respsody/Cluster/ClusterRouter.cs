@@ -130,39 +130,58 @@ public sealed class ClusterRouter : IDisposable
         var currentState = _state;
 
         var client = CreateClient(seedEndpoint);
-        await client.Start();
-
-        var connectionMetadata = new ClusterNodeConnectionMetadata(client.Metadata!);
-        if (!connectionMetadata.ServerMode.IsCluster)
-            throw new RespConnectionException("Seed node's mode must be `cluster`");
-
-        using var nodesCommand = client.CreateCommand<RespString>("CLUSTER").Arg("NODES");
-        using var response = await client.ExecuteCommand(nodesCommand);
-        var responseString = response.ToString() ?? throw new RespUnexpectedOperationException(
-            "Failed to get cluster nodes because response is null");
-
-        var activeClusterNodes = responseString.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(l => NodeMetadata.Parse(l.Trim('\r')))
-            .Where(m => !m.Flags.Failed && m.Address is { })
-            .Select(meta => new ClusterNode(
-                        meta.Flags.Myself
-                            ? client
-                            : currentState?.Nodes.FirstOrDefault(n => n.Id == meta.Id)?.Client
-                              ?? CreateClient(meta.Address!.FormatEndpoint()),
-                        meta))
-            .ToArray();
-
-        foreach (var node in currentState?.Nodes ?? [])
+        List<RespClient> createdClients = [client];
+        ClusterNode[]? activeClusterNodes = null;
+        var published = false;
+        try
         {
-            if (activeClusterNodes.Any(n => n.Id == node.Id))
-                continue;
+            await client.Start();
 
-            node.Client.Dispose();
+            var connectionMetadata = new ClusterNodeConnectionMetadata(client.Metadata!);
+            if (!connectionMetadata.ServerMode.IsCluster)
+                throw new RespConnectionException("Seed node's mode must be `cluster`");
+
+            using var nodesCommand = client.CreateCommand<RespString>("CLUSTER").Arg("NODES");
+            using var response = await client.ExecuteCommand(nodesCommand);
+            var responseString = response.ToString() ?? throw new RespUnexpectedOperationException(
+                "Failed to get cluster nodes because response is null");
+
+            activeClusterNodes = responseString.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(l => NodeMetadata.Parse(l.Trim('\r')))
+                .Where(m => !m.Flags.Failed && m.Address is { })
+                .Select(meta =>
+                {
+                    var nodeClient = currentState?.Nodes.FirstOrDefault(n => n.Id == meta.Id && n.Metadata.Address == meta.Address)?.Client;
+                    if (nodeClient is null)
+                    {
+                        nodeClient = meta.Flags.Myself ? client : CreateClient(meta.Address!.FormatEndpoint());
+                        if (!ReferenceEquals(nodeClient, client))
+                            createdClients.Add(nodeClient);
+                    }
+
+                    return new ClusterNode(nodeClient, meta);
+                })
+                .ToArray();
+
+            if (activeClusterNodes.Length == 0)
+                throw new RespConnectionException("Cluster topology contains no active nodes.");
+
+            foreach (var clusterNode in activeClusterNodes)
+                clusterNode.AssignReplicas(activeClusterNodes);
+
+            _state = new ClusterState(activeClusterNodes, new SlotsMap(activeClusterNodes));
+            published = true;
+
+            foreach (var node in currentState?.Nodes ?? [])
+                if (!activeClusterNodes.Any(n => ReferenceEquals(n.Client, node.Client)))
+                    node.Client.Dispose();
         }
-
-        foreach (var clusterNode in activeClusterNodes)
-            clusterNode.AssignReplicas(activeClusterNodes);
-
-        _state = new ClusterState(activeClusterNodes, new SlotsMap(activeClusterNodes));
+        finally
+        {
+            foreach (var createdClient in createdClients)
+                if (!published || !activeClusterNodes!.Any(n => ReferenceEquals(n.Client, createdClient)))
+                    createdClient.Dispose();
+        }
     }
 
     private void OnRespError(RespErrorResponseException exception)
