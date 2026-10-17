@@ -73,7 +73,8 @@ public class ReliabilityTests(RedisSingleNodeFixture fixture, ITestOutputHelper 
                                 if (!v2.ToString(Encoding.UTF8)!.SequenceEqual(str2))
                                     throw new Exception($"this should not happen // {i} // {str2} != {v2.AsUnicodeSpan()}");
 
-                                using var docs = await client.Command(DOCS);
+                                using var docs = await client.Command(DOCS, "GET");
+                                Assert.Equal(1, docs.Length);
 
                                 // redundant disposals
                                 // don't try this at home
