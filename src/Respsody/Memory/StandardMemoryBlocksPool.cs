@@ -74,9 +74,9 @@ public class StandardMemoryBlocksPool(long memoryLimitInBytes = 512 * 1024 * 102
 
     public void Return(MemoryBlock memoryBlock)
     {
-        if (Interlocked.Add(ref _accumulatedBytes, memoryBlock.Size) >= memoryLimitInBytes)
+        if (Interlocked.Add(ref _accumulatedBytes, memoryBlock.Size) > memoryLimitInBytes)
         {
-            Interlocked.Add(ref _accumulatedBytes, -_accumulatedBytes);
+            Interlocked.Add(ref _accumulatedBytes, -memoryBlock.Size);
             return;
         }
 
