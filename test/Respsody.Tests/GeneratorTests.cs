@@ -15,6 +15,50 @@ namespace Respsody.Tests;
 public class GeneratorTests
 {
     [Theory]
+    [InlineData("RespCommand")]
+    [InlineData("RespCommandAttribute")]
+    [InlineData("global::Respsody.RespCommand")]
+    [InlineData("CommandAlias")]
+    [InlineData("LibraryAlias.RespCommand")]
+    public void RecognizesAttributeAliases(string attributeName)
+    {
+        var result = Generate($$"""
+            using Respsody;
+            using Respsody.Resp;
+            using CommandAlias = Respsody.RespCommandAttribute;
+            using LibraryAlias = Respsody;
+            namespace Generated;
+            [{{attributeName}}("PING", ResponseType.String)]
+            public static class Definitions;
+            """);
+
+        AssertCompiles(result);
+        Assert.NotNull(result.Output.GetTypeByMetadataName("Generated.PING"));
+    }
+
+    [Fact]
+    public void IgnoresAttributesFromAnUnrelatedNamespace()
+    {
+        var result = Generate("""
+            namespace Foo.Respsody
+            {
+                public sealed class RespCommandAttribute : System.Attribute
+                {
+                    public RespCommandAttribute(string command, global::Respsody.Resp.ResponseType type) { }
+                }
+            }
+            namespace Generated
+            {
+                [Foo.Respsody.RespCommand("PING", global::Respsody.Resp.ResponseType.String)]
+                public static class Definitions;
+            }
+            """);
+
+        AssertCompiles(result);
+        Assert.Empty(result.Run.GeneratedTrees);
+    }
+
+    [Theory]
     [InlineData(true)]
     [InlineData(false)]
     public void EscapesLiteralWireValues(bool reduced)

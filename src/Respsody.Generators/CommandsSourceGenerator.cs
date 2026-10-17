@@ -11,9 +11,7 @@ namespace Respsody.Generators;
 [Generator(LanguageNames.CSharp)]
 internal class CommandsSourceGenerator : IIncrementalGenerator
 {
-    private const string AttributeFullName = "RespCommandAttribute";
-    private const string AttributeName = "RespCommand";
-    private const string AttributeNamespace = "Respsody";
+    private const string AttributeMetadataName = "Respsody.RespCommandAttribute";
 
     private static readonly DiagnosticDescriptor ErrorRule = new(
         id: "CommandsSourceGeneratorError",
@@ -25,9 +23,10 @@ internal class CommandsSourceGenerator : IIncrementalGenerator
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        var contextSyntaxProvider = context.SyntaxProvider.CreateSyntaxProvider(
+        var contextSyntaxProvider = context.SyntaxProvider.ForAttributeWithMetadataName(
+            AttributeMetadataName,
             (syntaxNode, _) => IsCommandDefinitionClass(syntaxNode),
-            (ctx, _) => (ctx.Node, ctx.SemanticModel));
+            (ctx, _) => (Node: ctx.TargetNode, ctx.SemanticModel));
 
         var commandContexts = contextSyntaxProvider
             .SelectMany((v, ct) => CreateRespCommandContext(v.Node, v.SemanticModel, ct));
@@ -195,8 +194,8 @@ internal class CommandsSourceGenerator : IIncrementalGenerator
             if (semanticModel.GetDeclaredSymbol(node) is not INamedTypeSymbol symbol)
                 throw new InvalidCastException("Node is not NamedTypeSyntax");
 
-            var attributes = symbol.GetAttributes().Where(a => a.AttributeClass?.ContainingNamespace.Name == AttributeNamespace
-                                                               && a.AttributeClass.Name == AttributeFullName);
+            var attributeType = semanticModel.Compilation.GetTypeByMetadataName(AttributeMetadataName);
+            var attributes = symbol.GetAttributes().Where(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, attributeType));
 
             foreach (var attribute in attributes)
             {
@@ -267,10 +266,7 @@ internal class CommandsSourceGenerator : IIncrementalGenerator
         if (syntaxNode is not ClassDeclarationSyntax classDeclaration)
             return false;
 
-        return classDeclaration.Modifiers.Any(m => m.Text is "static")
-               && classDeclaration.AttributeLists.Any(attrList => attrList.Attributes
-                                                          .Any(attr => attr.Name is IdentifierNameSyntax { Identifier.Text: AttributeName or AttributeFullName }
-                                                                   or QualifiedNameSyntax { Right.Identifier.Text: AttributeName or AttributeFullName }));
+        return classDeclaration.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
     }
 
     private class ErrorContext(Exception exception, Location location)
