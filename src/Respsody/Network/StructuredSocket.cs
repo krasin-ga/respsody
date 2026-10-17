@@ -94,11 +94,16 @@ public sealed class StructuredSocket<TIncoming, TPayload> : IDisposable
                 using var socket = connectedSocket.Socket;
                 using var cancellation = linkedCts.Token.UnsafeRegister(static state => ((Socket)state!).Dispose(), socket);
 
-                await _handler.InitializeConnection(connectedSocket, currentGeneration, linkedCts.Token);
-                _initialConnectionTcs.TrySetResult();
-
-                await disconnectedBeatCts.CancelAsync();
-                await expirationCheck;
+                try
+                {
+                    await _handler.InitializeConnection(connectedSocket, currentGeneration, linkedCts.Token);
+                    _initialConnectionTcs.TrySetResult();
+                }
+                finally
+                {
+                    await disconnectedBeatCts.CancelAsync();
+                    await expirationCheck;
+                }
 
                 var receivingTask = SafeRun(() => ReceivingLoop(socket, linkedCts.Token));
                 var sendingTask = SafeRun(() => SendingLoop(socket, currentGeneration, linkedCts.Token));
