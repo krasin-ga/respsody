@@ -70,19 +70,19 @@ internal class CommandSyntaxNode : SyntaxNode
 
             if (_context.AllArgsAreFixedSize)
             {
-                var commandWithArraySize = $"*{_context.StaticArgCount}\r\n{GetUtf8RepresentationInternal()}".EscapeLines();
+                var commandWithArraySize = $"*{_context.StaticArgCount}\r\n{GetUtf8RepresentationInternal()}";
 
                 return
                 [
-                    ParseStatement($"var {cmd} = {client}.CreateCommand<{commandTypeArgument}>(\"{node.Command}\", @unsafe: true); "),
+                    ParseStatement($"var {cmd} = {client}.CreateCommand<{commandTypeArgument}>({node.Command.ToLiteral()}, @unsafe: true); "),
                     ParseStatement($"var {page} = {cmd}.OutgoingBuffer;"),
-                    ParseStatement($"{page}.Write(\"{commandWithArraySize}\"u8);"),
+                    ParseStatement($"{page}.Write({commandWithArraySize.ToLiteral()}u8);"),
                 ];
             }
             
             return
             [
-                ParseStatement($"var {cmd} = {client}.CreateCommand<{commandTypeArgument}>(\"{node.Command}\", @unsafe: true); "),
+                ParseStatement($"var {cmd} = {client}.CreateCommand<{commandTypeArgument}>({node.Command.ToLiteral()}, @unsafe: true); "),
                 ParseStatement($"var {page} = {cmd}.OutgoingBuffer;"),
                 ParseStatement($"{page}.WriteArraySize({argCount});"),
                 ParseStatement($"{page}.Write(CommandBulkString);"),
@@ -105,13 +105,13 @@ internal class CommandSyntaxNode : SyntaxNode
             if (_context.AllArgsAreFixedSize)
                 return
                 [
-                    ParseStatement($"var {cmd} = {client}.CreateCommand<{commandTypeArgument}>(\"{node.Command}\", @unsafe: true); "),
+                    ParseStatement($"var {cmd} = {client}.CreateCommand<{commandTypeArgument}>({node.Command.ToLiteral()}, @unsafe: true); "),
                     ParseStatement($"var {page} = {cmd}.OutgoingBuffer;"),
                 ];
 
             return
             [
-                ParseStatement($"var {cmd} = {client}.CreateCommand<{commandTypeArgument}>(\"{node.Command}\", @unsafe: true); "),
+                ParseStatement($"var {cmd} = {client}.CreateCommand<{commandTypeArgument}>({node.Command.ToLiteral()}, @unsafe: true); "),
                 ParseStatement($"var {page} = {cmd}.OutgoingBuffer;"),
                 ParseStatement($"{page}.WriteArraySize({argCount});")
             ];

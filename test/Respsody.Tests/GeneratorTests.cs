@@ -3,8 +3,10 @@ using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Respsody.Resp;
 using Xunit;
 
@@ -12,6 +14,45 @@ namespace Respsody.Tests;
 
 public class GeneratorTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void EscapesLiteralWireValues(bool reduced)
+    {
+        const string value = "a\"b\\c\té\0";
+        var pattern = reduced ? $"ECHO CONSTANT=`{value}` key" : $"ECHO key CONSTANT=`{value}` [key ...]";
+        var result = Generate($$"""
+            using Respsody;
+            using Respsody.Resp;
+            namespace Generated;
+            [RespCommand({{SymbolDisplay.FormatLiteral(pattern, quote: true)}}, ResponseType.Void)]
+            public static class Definitions;
+            """);
+        AssertCompiles(result);
+
+        var literal = result.Run.GeneratedTrees.Single().GetRoot().DescendantNodes()
+            .OfType<LiteralExpressionSyntax>()
+            .First(node => node.IsKind(SyntaxKind.Utf8StringLiteralExpression));
+        var probe = CSharpSyntaxTree.ParseText($$"""
+            public static class Probe
+            {
+                public static byte[] Bytes() => ({{literal}}).ToArray();
+            }
+            """, new CSharpParseOptions(LanguageVersion.CSharp12));
+        using var stream = new MemoryStream();
+        var emitted = result.Output.AddSyntaxTrees(probe).Emit(stream);
+        Assert.True(emitted.Success, string.Join(Environment.NewLine, emitted.Diagnostics));
+        var assembly = Assembly.Load(stream.ToArray());
+
+        var bulkString = $"${Encoding.UTF8.GetByteCount(value)}\r\n{value}\r\n";
+        Assert.Equal(Encoding.UTF8.GetBytes(bulkString),
+            (byte[])assembly.GetType("Generated.ECHO+Options+CONSTANT")!
+                .GetField("BulkString")!.GetValue(null)!);
+        var expectedLiteral = reduced ? $"*3\r\n$4\r\nECHO\r\n{bulkString}" : "*3\r\n$4\r\nECHO\r\n";
+        Assert.Equal(Encoding.UTF8.GetBytes(expectedLiteral),
+            (byte[])assembly.GetType("Probe")!.GetMethod("Bytes")!.Invoke(null, null)!);
+    }
+
     [Fact]
     public void PreservesPermutedCommandOverloads()
     {

@@ -83,7 +83,7 @@ internal static class Build
                             .WithInitializer(
                                 EqualsValueClause(
                                     ParseExpression(
-                                        $"ProtocolWriter.ConvertToBulkString(\"{command}\")"
+                                        $"ProtocolWriter.ConvertToBulkString({command.ToLiteral()})"
                                     )))
                     ))
         ).WithModifiers(
@@ -201,9 +201,7 @@ internal static class Build
                     sb.Append(nodeWithBuilder.Builder.GetUtf8Representation());
                 }
 
-                var text = $"{page}.Write(\"{sb}\"u8);";
-
-                text = text.EscapeLines();
+                var text = $"{page}.Write({sb.ToString().ToLiteral()}u8);";
 
                 bodyStatements.Add(
                     ParseStatement(text)
@@ -226,9 +224,9 @@ internal static class Build
     }
 
 
-    public static string EscapeLines(this string text)
+    public static string ToLiteral(this string text)
     {
-        return text.Replace("\r", "\\r").Replace("\n", "\\n");
+        return Literal(text).Text;
     }
 
     public static ClassDeclarationSyntax OptionTypes(
@@ -255,7 +253,7 @@ internal static class Build
                                         .WithInitializer(
                                             EqualsValueClause(
                                                 ParseExpression(
-                                                    $"ProtocolWriter.ConvertToBulkString(\"{option.Value}\")"
+                                                    $"ProtocolWriter.ConvertToBulkString({option.Value.ToLiteral()})"
                                                 )))
                                 )))
                     .WithModifiers(
