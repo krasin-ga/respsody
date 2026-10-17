@@ -341,11 +341,33 @@ public sealed class RespClient(
             attribute?.Dispose();
             using var errorString = new RespString(frame, payload.Guard);
             var exception = new RespErrorResponseException(errorString.ToString(Encoding.UTF8) ?? "NULL");
+            NotifyRespError(exception);
             payload.CompleteWithException(exception, ticks);
             return;
         }
 
         payload.Complete(frame, ticks, attribute);
+    }
+
+    private void NotifyRespError(RespErrorResponseException exception)
+    {
+        foreach (var observer in options.RespErrorObservers)
+        {
+            try
+            {
+                observer(exception);
+            }
+            catch (Exception observerException)
+            {
+                try
+                {
+                    HandleConnectionError(observerException);
+                }
+                catch
+                {
+                }
+            }
+        }
     }
 
     private void DequeueCompletedSubscriptions()
