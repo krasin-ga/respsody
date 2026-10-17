@@ -48,6 +48,7 @@ public sealed class DirectSocketRpc: IDisposable
         commandBuilder(cmd);
         cmd.FinalizeCommand();
 
+        using var cancellation = token.UnsafeRegister(static state => ((Socket)state!).Dispose(), _socket);
         try
         {
             token.ThrowIfCancellationRequested();

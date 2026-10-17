@@ -91,6 +91,7 @@ public sealed class StructuredSocket<TIncoming, TPayload> : IDisposable
                 }
 
                 using var socket = connectedSocket.Socket;
+                using var cancellation = linkedCts.Token.UnsafeRegister(static state => ((Socket)state!).Dispose(), socket);
 
                 await _handler.InitializeConnection(connectedSocket, currentGeneration, linkedCts.Token);
                 _initialConnectionTcs.TrySetResult();
@@ -109,15 +110,7 @@ public sealed class StructuredSocket<TIncoming, TPayload> : IDisposable
                 var interruptionException = await await Task.WhenAny(receivingTask, sendingTask);
                 await linkedCts.CancelAsync();
 
-                var whenAll = Task.WhenAll(receivingTask, sendingTask);
-                while (!whenAll.IsCompleted)
-                {
-                    //signal noop to channel
-                    _channelWriter.TryWrite(default);
-                    await Task.Yield();
-                }
-
-                foreach (var exception in await whenAll)
+                foreach (var exception in await Task.WhenAll(receivingTask, sendingTask))
                     interruptionException ??= exception;
 
                 if (interruptionException is { })
@@ -136,7 +129,7 @@ public sealed class StructuredSocket<TIncoming, TPayload> : IDisposable
         var outgoingBuffer = new byte[_options.OutgoingBufferSize];
         var written = 0;
         
-        while (await outgoingChannel.WaitToReadAsync(CancellationToken.None))
+        while (await outgoingChannel.WaitToReadAsync(token))
         {
             token.ThrowIfCancellationRequested();
 
