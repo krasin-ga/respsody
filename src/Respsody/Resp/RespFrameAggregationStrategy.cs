@@ -83,12 +83,17 @@ public class RespFrameAggregationStrategy(RespAggregatesPool slicesPool)
             {
                 ref var element = ref _stack[_stackPosition];
 
-                element.Aggregate.Add(variant);
+                var isEnd = element.Remaining <= Constants.StreamedLength
+                    && variant.Simple?.Context.Type == RespType.End;
+                if (isEnd)
+                    variant.Dispose();
+                else
+                {
+                    element.Aggregate.Add(variant);
+                    element.Remaining--;
+                }
 
-                var remaining = --element.Remaining;
-                if (remaining == 0 ||
-                    remaining < Constants.StreamedLength
-                    && variant.Simple?.Context.Type == RespType.End)
+                if (element.Remaining == 0 || isEnd)
                 {
                     variant = new RespValueVariant(element.Aggregate);
                     element = default;
