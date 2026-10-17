@@ -66,6 +66,9 @@ internal class RawSyntaxParser
             }
         }
 
+        if (appendingConstant)
+            throw new FormatException("Unterminated backtick literal: expected a closing `.");
+
         if (token.Length > 0)
             tokens.Add(token.ToString());
 

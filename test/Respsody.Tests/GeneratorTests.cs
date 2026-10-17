@@ -16,6 +16,30 @@ namespace Respsody.Tests;
 public class GeneratorTests
 {
     [Theory]
+    [InlineData("ECHO TEXT=`unfinished")]
+    [InlineData("ECHO TEXT=`")]
+    [InlineData("ECHO FIRST=`complete` SECOND=`unfinished")]
+    public void ReportsUnterminatedBacktickLiterals(string pattern)
+    {
+        var result = Generate($$"""
+            using Respsody;
+            using Respsody.Resp;
+            namespace Generated;
+            [RespCommand({{SymbolDisplay.FormatLiteral(pattern, quote: true)}}, ResponseType.Void)]
+            public static class Definitions;
+            """);
+
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal(DiagnosticSeverity.Error, diagnostic.Severity);
+        Assert.Equal("CommandsSourceGeneratorError", diagnostic.Id);
+        Assert.Equal("Invalid RESP command definition: Unterminated backtick literal: expected a closing `.",
+            diagnostic.GetMessage());
+        Assert.True(diagnostic.Location.IsInSource);
+        Assert.Null(Assert.Single(result.Run.Results).Exception);
+        Assert.Empty(result.Run.GeneratedTrees);
+    }
+
+    [Theory]
     [InlineData("")]
     [InlineData(" \t\r\n")]
     public void ReportsAnActionableDiagnosticForEmptyCommands(string pattern)
