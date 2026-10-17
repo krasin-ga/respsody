@@ -11,6 +11,8 @@ public readonly struct RespMap(RespAggregate respAggregate, DisposalGuard guard)
     public IReadOnlyDictionary<TKey, object?> ToMapOf<TKey>(DecodeFrame<TKey> decode)
         where TKey : notnull
     {
+        guard.CheckDisposed();
+
         var length = respAggregate.Length;
         var dictionary = new Dictionary<TKey, object?>(length);
         for (var i = 1; i < length; i += 2)

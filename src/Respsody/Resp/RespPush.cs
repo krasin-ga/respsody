@@ -17,23 +17,33 @@ public readonly struct RespPush : IDisposable
 
     public int Length { get; }
 
-    public OwnedRespValueVariant this[int i] =>
-        new (_respAggregate[i + 1], _guard);
+    public OwnedRespValueVariant this[int i]
+    {
+        get
+        {
+            _guard.CheckDisposed();
+            return new OwnedRespValueVariant(_respAggregate[i + 1], _guard);
+        }
+    }
 
     public T[] ToArrayOf<T>(IRespCodec codec)
     {
+        _guard.CheckDisposed();
+
         var array = new T[Length];
         for (var i = 0; i < Length; i++)
-            array[i] = codec.Decode<T>(this[i]);
+            array[i] = codec.Decode<T>(new OwnedRespValueVariant(_respAggregate[i + 1], _guard));
 
         return array;
     }
 
     public T[] ToArrayOf<T>(Decode<T> decode)
     {
+        _guard.CheckDisposed();
+
         var array = new T[Length];
         for (var i = 0; i < Length; i++)
-            array[i] = decode(this[i]);
+            array[i] = decode(new OwnedRespValueVariant(_respAggregate[i + 1], _guard));
 
         return array;
     }

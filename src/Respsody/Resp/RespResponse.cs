@@ -55,6 +55,8 @@ public readonly struct RespResponse(
 
     public string ToDebugString()
     {
+        guard.CheckDisposed();
+
         var attributeDbgString = Attribute?.ToDebugString();
 
         return attributeDbgString == null 

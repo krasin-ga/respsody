@@ -9,7 +9,14 @@ public readonly struct RespArray(RespAggregate respAggregate, DisposalGuard guar
 {
     public int Length { get; } = respAggregate.Length - 1;
 
-    public OwnedRespValueVariant this[int i] => new(respAggregate[i + 1], guard);
+    public OwnedRespValueVariant this[int i]
+    {
+        get
+        {
+            guard.CheckDisposed();
+            return new OwnedRespValueVariant(respAggregate[i + 1], guard);
+        }
+    }
 
     public Enumerator<RespString> EnumerateStrings()
     {
@@ -28,7 +35,7 @@ public readonly struct RespArray(RespAggregate respAggregate, DisposalGuard guar
 
         var array = new T[Length];
         for (var i = 0; i < Length; i++)
-            array[i] = codec.Decode<T>(this[i]);
+            array[i] = codec.Decode<T>(new OwnedRespValueVariant(respAggregate[i + 1], guard));
 
         return array;
     }
@@ -39,7 +46,7 @@ public readonly struct RespArray(RespAggregate respAggregate, DisposalGuard guar
 
         var array = new T[Length];
         for (var i = 0; i < Length; i++)
-            array[i] = decode(this[i]);
+            array[i] = decode(new OwnedRespValueVariant(respAggregate[i + 1], guard));
 
         return array;
     }
@@ -70,6 +77,8 @@ public readonly struct RespArray(RespAggregate respAggregate, DisposalGuard guar
 
         public bool MoveNext()
         {
+            guard.CheckDisposed();
+
             if (++_index >= data.Length)
                 return false;
 

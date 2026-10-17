@@ -34,6 +34,8 @@ public readonly struct RespBoolean : IRespResponse
 
     public bool ToBool()
     {
+        _guard.CheckDisposed();
+
         var span = _frame.Span;
         if (span.Length == 4)
         {

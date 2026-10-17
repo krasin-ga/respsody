@@ -21,6 +21,8 @@ public readonly struct RespBigNumber : IRespResponse
 
     public BigInteger ToBigInteger()
     {
+        _guard.CheckDisposed();
+
         var span = _frame.Span[1..^2];
 
         var sign = 1;

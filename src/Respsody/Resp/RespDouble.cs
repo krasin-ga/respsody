@@ -20,6 +20,8 @@ public readonly struct RespDouble : IRespResponse
     }
     public double ToDouble()
     {
+        _guard.CheckDisposed();
+
         var span = _frame.Span[1..^2];
 
         if (Utf8Parser.TryParse(span, out double parsed, out var bytesConsumed)
