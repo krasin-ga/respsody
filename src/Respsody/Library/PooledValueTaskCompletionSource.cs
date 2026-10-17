@@ -15,6 +15,7 @@ public sealed class PooledValueTaskCompletionSource<TResult> : IValueTaskSource<
     }
 
     public ValueTask<TResult> AsValueTask() => new(this, _core.Version);
+    internal void ReturnUnused() => Reset();
     public ValueTaskSourceStatus GetStatus(short token) => _core.GetStatus(token);
 
     public void OnCompleted(Action<object?> continuation, object? state, short token, ValueTaskSourceOnCompletedFlags flags)

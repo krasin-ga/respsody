@@ -138,27 +138,27 @@ public sealed class RespClient(
             _runContinuationsAsynchronously
         );
 
-        Bytes[]? subAcks = null;
-        var responseType = ResponseTypeMapping.GetResponseTypeEnum<T>();
-        if (responseType == ResponseType.Subscription)
-        {
-            subAcks = CommandParser.ParseArgumentsSlow(command);
-            cancellationToken = CancellationToken.None;
-            command.WithTimeout(int.MaxValue);
-        }
-
-        var payload = new Payload(
-            respClient: this,
-            taskCompletionSource: taskCompletionSource,
-            responseType: responseType,
-            command: command.CommandName ?? "<unknown>",
-            startTicks: Environment.TickCount,
-            timeout: command.Timeout,
-            subAcks: subAcks,
-            cancellationToken: cancellationToken);
-
         try
         {
+            Bytes[]? subAcks = null;
+            var responseType = ResponseTypeMapping.GetResponseTypeEnum<T>();
+            if (responseType == ResponseType.Subscription)
+            {
+                subAcks = CommandParser.ParseArgumentsSlow(command);
+                cancellationToken = CancellationToken.None;
+                command.WithTimeout(int.MaxValue);
+            }
+
+            var payload = new Payload(
+                respClient: this,
+                taskCompletionSource: taskCompletionSource,
+                responseType: responseType,
+                command: command.CommandName ?? "<unknown>",
+                startTicks: Environment.TickCount,
+                timeout: command.Timeout,
+                subAcks: subAcks,
+                cancellationToken: cancellationToken);
+
             _structuredSocket.Send(new TransmitUnit<Payload>(command.OutgoingBuffer, payload));
         }
         catch (Exception exception)
@@ -173,7 +173,7 @@ public sealed class RespClient(
     public ComboCommand<T> Pack<T>(Combo combo, Command<T> command, CancellationToken token = default)
         where T : IRespResponse
     {
-        if (_structuredSocket?.IsDisposed is true)
+        if (_disposed || _structuredSocket?.IsDisposed is true)
             throw new RespClientDisposedException();
 
         var responseType = ResponseTypeMapping.GetResponseTypeEnum<T>();
@@ -186,18 +186,27 @@ public sealed class RespClient(
             _runContinuationsAsynchronously
         );
 
-        var payload = new Payload(
-            respClient: this,
-            taskCompletionSource: responseCompletionSource,
-            responseType: responseType,
-            command: "<combo>",
-            timeout: command.Timeout,
-            startTicks: Environment.TickCount,
-            cancellationToken: token);
+        try
+        {
+            var payload = new Payload(
+                respClient: this,
+                taskCompletionSource: responseCompletionSource,
+                responseType: responseType,
+                command: "<combo>",
+                timeout: command.Timeout,
+                startTicks: Environment.TickCount,
+                cancellationToken: token);
 
-        var comboCommand = new ComboCommand<T>(command, payload, responseCompletionSource.AsValueTask());
-        combo.AddPayload(comboCommand.TransmitUnit);
-        return comboCommand;
+            var comboCommand = new ComboCommand<T>(command, payload, responseCompletionSource.AsValueTask());
+            combo.AddPayload(comboCommand.TransmitUnit);
+            return comboCommand;
+        }
+        catch
+        {
+            command.OutgoingBuffer.FreeByDeliveryPipeline();
+            responseCompletionSource.ReturnUnused();
+            throw;
+        }
     }
 
     public void Execute(Combo combo)
