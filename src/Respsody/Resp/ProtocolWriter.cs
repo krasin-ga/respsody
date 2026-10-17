@@ -18,7 +18,18 @@ public static class ProtocolWriter
     public static byte[] ConvertToBulkString(string str)
     {
         var byteCount = Encoding.UTF8.GetByteCount(str);
-        return Encoding.UTF8.GetBytes($"${byteCount}\r\n{str}\r\n");
+        Span<byte> prefix = stackalloc byte[MaxPrefixBytes];
+        prefix[0] = (byte)RespType.BulkString;
+        if (!Utf8Formatter.TryFormat(byteCount, prefix[1..], out var digits))
+            throw new InvalidOperationException();
+
+        WriteCrlf(prefix, digits + 1);
+        var prefixLength = digits + 3;
+        var bytes = new byte[checked(prefixLength + byteCount + 2)];
+        prefix[..prefixLength].CopyTo(bytes);
+        Encoding.UTF8.GetBytes(str, bytes.AsSpan(prefixLength, byteCount));
+        WriteCrlf(bytes, prefixLength + byteCount);
+        return bytes;
     }
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public static bool TryWriteBulkStringInOneBlock(
