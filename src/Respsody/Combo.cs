@@ -150,8 +150,6 @@ public readonly struct Combo(IDirectRespClient client, int timeout = int.MaxValu
         public Builder5<T1, T2, T3, T4, TResult> Cmd<TArg, TResult>(TArg arg, Func<IRespClient, TArg, Command<TResult>> commandFactory)
             where TResult : IRespResponse
         {
-            parent.CreateCommand(arg, commandFactory);
-
             return new Builder5<T1, T2, T3, T4, TResult>(parent, c1, c2, c3, c4, parent.CreateCommand(arg, commandFactory));
         }
 
