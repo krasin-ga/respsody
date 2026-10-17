@@ -32,8 +32,14 @@ public readonly struct Combo(IDirectRespClient client, int timeout = int.MaxValu
         catch (Exception exception)
         {
             command?.Dispose();
-            Reject(exception);
-            Dispose();
+            try
+            {
+                Reject(exception);
+            }
+            finally
+            {
+                Dispose();
+            }
             throw;
         }
     }
@@ -54,8 +60,14 @@ public readonly struct Combo(IDirectRespClient client, int timeout = int.MaxValu
         catch (Exception exception)
         {
             command?.Dispose();
-            Reject(exception);
-            Dispose();
+            try
+            {
+                Reject(exception);
+            }
+            finally
+            {
+                Dispose();
+            }
             throw;
         }
     }
@@ -71,8 +83,14 @@ public readonly struct Combo(IDirectRespClient client, int timeout = int.MaxValu
         }
         catch (Exception exception)
         {
-            Reject(exception);
-            Dispose();
+            try
+            {
+                Reject(exception);
+            }
+            finally
+            {
+                Dispose();
+            }
             throw;
         }
     }
@@ -83,22 +101,41 @@ public readonly struct Combo(IDirectRespClient client, int timeout = int.MaxValu
             return;
 
         _ownedCommands.Disposed = true;
-        if (!_ownedCommands.Submitted)
-            Reject(new ObjectDisposedException(nameof(Combo)));
-
-        foreach (var ownedCommand in _ownedCommands)
-            ownedCommand.Dispose();
-        _ownedCommands.Clear();
+        try
+        {
+            if (!_ownedCommands.Submitted)
+                Reject(new ObjectDisposedException(nameof(Combo)));
+        }
+        finally
+        {
+            foreach (var ownedCommand in _ownedCommands)
+                ownedCommand.Dispose();
+            _ownedCommands.Clear();
+        }
     }
 
     private void Reject(Exception exception)
     {
+        Exception? failure = null;
         foreach (var unit in PreparedPayload)
         {
-            unit.Payload.CompleteWithException(exception, Environment.TickCount);
-            unit.Page.FreeByDeliveryPipeline();
+            try
+            {
+                unit.Payload.CompleteWithException(exception, Environment.TickCount);
+            }
+            catch (Exception callbackException)
+            {
+                failure ??= callbackException;
+            }
+            finally
+            {
+                unit.Page.FreeByDeliveryPipeline();
+            }
         }
         PreparedPayload.Clear();
+
+        if (failure is not null)
+            ExceptionDispatchInfo.Throw(failure);
     }
 
     private void CheckAvailable()

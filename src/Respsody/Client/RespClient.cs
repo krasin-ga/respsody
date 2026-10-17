@@ -1,6 +1,7 @@
 ﻿using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using Respsody.Client.Options;
 using Respsody.Exceptions;
@@ -337,7 +338,15 @@ public sealed class RespClient(
 
     public void OnDisconnected(Exception? exception, int generation)
     {
-        _clientHandler?.OnDisconnected(this, exception, generation);
+        Exception? failure = null;
+        try
+        {
+            _clientHandler?.OnDisconnected(this, exception, generation);
+        }
+        catch (Exception callbackException)
+        {
+            failure = callbackException;
+        }
 
         _respFrameAggregationStrategy.Reset();
         _attribute?.Dispose();
@@ -348,8 +357,15 @@ public sealed class RespClient(
             if (!_responseQueue.TryDequeue(out _))
                 Panic("[on disconnected] failed to dequeue response for completion with error");
 
-            response.CompleteWithException(exception ?? new RespConnectionLostException(),
-                ticks: Environment.TickCount);
+            try
+            {
+                response.CompleteWithException(exception ?? new RespConnectionLostException(),
+                    ticks: Environment.TickCount);
+            }
+            catch (Exception callbackException)
+            {
+                failure ??= callbackException;
+            }
         }
 
         while (_subUnSubConfirmationsQueue.TryPeek(out var sub) && sub.ConnectionGeneration <= generation)
@@ -359,6 +375,9 @@ public sealed class RespClient(
 
             sub.CompleteWithException(exception ?? new RespConnectionLostException());
         }
+
+        if (failure is not null)
+            ExceptionDispatchInfo.Throw(failure);
     }
 
     public async ValueTask InitializeConnection(ConnectedSocket connectedSocket, int generation,

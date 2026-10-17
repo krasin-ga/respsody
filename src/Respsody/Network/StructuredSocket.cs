@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Net.Sockets;
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using System.Threading.Channels;
 using Respsody.Exceptions;
 using Respsody.Memory;
@@ -136,8 +137,14 @@ public sealed class StructuredSocket<TIncoming, TPayload> : IDisposable
         }
         finally
         {
-            ReleaseQueued();
-            _framing.Dispose();
+            try
+            {
+                ReleaseQueued();
+            }
+            finally
+            {
+                _framing.Dispose();
+            }
         }
     }
 
@@ -236,8 +243,7 @@ public sealed class StructuredSocket<TIncoming, TPayload> : IDisposable
                 }
                 finally
                 {
-                    for (index++; index < multiple.Count; index++)
-                        Release(multiple[index], Environment.TickCount);
+                    Release(multiple, index + 1, Environment.TickCount);
                 }
             }
 
@@ -328,8 +334,16 @@ public sealed class StructuredSocket<TIncoming, TPayload> : IDisposable
     {
         if (data.Single is { } single)
         {
-            if (single.Payload?.TryExpire(ticks) is not true)
-                return false;
+            try
+            {
+                if (single.Payload?.TryExpire(ticks) is not true)
+                    return false;
+            }
+            catch
+            {
+                Release(single, ticks);
+                throw;
+            }
             single.Page.FreeByDeliveryPipeline();
             return true;
         }
@@ -337,15 +351,19 @@ public sealed class StructuredSocket<TIncoming, TPayload> : IDisposable
         if (data.Batch is not { Count: > 0 } multiple)
             return true;
 
-        if (multiple[0].Payload?.TryExpire(ticks) is not true)
-            return false;
+        try
+        {
+            if (multiple[0].Payload?.TryExpire(ticks) is not true)
+                return false;
+        }
+        catch
+        {
+            Release(multiple, 0, ticks);
+            throw;
+        }
 
         multiple[0].Page.FreeByDeliveryPipeline();
-        for (var i = 1; i < multiple.Count; i++)
-        {
-            multiple[i].Payload?.LinkedCancel(ticks);
-            multiple[i].Page.FreeByDeliveryPipeline();
-        }
+        Release(multiple, 1, ticks);
         return true;
     }
 
@@ -359,18 +377,35 @@ public sealed class StructuredSocket<TIncoming, TPayload> : IDisposable
         _initialConnectionTcs.TrySetCanceled();
         if (state == 0)
         {
-            ReleaseQueued();
-            _framing.Dispose();
+            try
+            {
+                ReleaseQueued();
+            }
+            finally
+            {
+                _framing.Dispose();
+            }
         }
     }
 
     private void ReleaseQueued()
     {
         var ticks = Environment.TickCount;
-        while (_pendingOutgoing.TryDequeue(out var pending))
-            Release(pending, ticks);
-        while (_outgoingChannel.Reader.TryRead(out var outgoing))
-            Release(outgoing, ticks);
+        Exception? failure = null;
+        while (_pendingOutgoing.TryDequeue(out var outgoing) || _outgoingChannel.Reader.TryRead(out outgoing))
+        {
+            try
+            {
+                Release(outgoing, ticks);
+            }
+            catch (Exception exception)
+            {
+                failure ??= exception;
+            }
+        }
+
+        if (failure is not null)
+            ExceptionDispatchInfo.Throw(failure);
     }
 
     private static void Release(in Outgoing outgoing, int ticks)
@@ -378,8 +413,26 @@ public sealed class StructuredSocket<TIncoming, TPayload> : IDisposable
         if (outgoing.Single is { } single)
             Release(single, ticks);
         else if (outgoing.Batch is { } batch)
-            for (var i = 0; i < batch.Count; i++)
+            Release(batch, 0, ticks);
+    }
+
+    private static void Release(IReadOnlyList<TransmitUnit<TPayload>> batch, int start, int ticks)
+    {
+        Exception? failure = null;
+        for (var i = start; i < batch.Count; i++)
+        {
+            try
+            {
                 Release(batch[i], ticks);
+            }
+            catch (Exception exception)
+            {
+                failure ??= exception;
+            }
+        }
+
+        if (failure is not null)
+            ExceptionDispatchInfo.Throw(failure);
     }
 
     private static void Release(in TransmitUnit<TPayload> unit, int ticks)
