@@ -14,6 +14,14 @@ public sealed class RespFraming(
     private readonly LengthParser _lengthParser = new();
     private State _currentState;
 
+    public override void Reset()
+    {
+        base.Reset();
+        _crLfParser.Reset();
+        _lengthParser.Reset();
+        _currentState = State.WaitingForType;
+    }
+
     protected override Sequence<RespContext> Create()
     {
         _currentState = State.WaitingForType;

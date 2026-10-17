@@ -239,7 +239,7 @@ public abstract class Framing<T>: IDisposable
         _cs = readyFrames;
     }
 
-    public void Reset()
+    public virtual void Reset()
     {
         _hasCurrentSequence = false;
         _currentSequence = default;

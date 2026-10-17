@@ -7,6 +7,8 @@ public class CrLfParser
 {
     private State _state;
 
+    public void Reset() => _state = State.WaitingForCr;
+
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public bool TryFind(ReadOnlySpan<byte> span, out ushort offset)
     {

@@ -9,6 +9,12 @@ public class LengthParser
     private int _accumulated = -1;
     private int _sign = 1;
 
+    public void Reset()
+    {
+        _accumulated = -1;
+        _sign = 1;
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public bool FeedAndTryParse(
         ReadOnlySpan<byte> span,
