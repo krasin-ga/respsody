@@ -123,7 +123,7 @@ public readonly struct Combo(IDirectRespClient client, int timeout = int.MaxValu
             return new Builder4<T1, T2, T3, TResult>(parent, c1, c2, c3, parent.CreateCommand(arg, commandFactory));
         }
 
-        public Builder4<T1, T2, T3, TResult> Cmd<TArg, TResult>(Func<IRespClient, Command<TResult>> commandFactory)
+        public Builder4<T1, T2, T3, TResult> Cmd<TResult>(Func<IRespClient, Command<TResult>> commandFactory)
             where TResult : IRespResponse
         {
             return new Builder4<T1, T2, T3, TResult>(parent, c1, c2, c3, parent.CreateCommand(commandFactory));
@@ -153,7 +153,7 @@ public readonly struct Combo(IDirectRespClient client, int timeout = int.MaxValu
             return new Builder5<T1, T2, T3, T4, TResult>(parent, c1, c2, c3, c4, parent.CreateCommand(arg, commandFactory));
         }
 
-        public Builder5<T1, T2, T3, T4, TResult> Cmd<TArg, TResult>(Func<IRespClient, Command<TResult>> commandFactory)
+        public Builder5<T1, T2, T3, T4, TResult> Cmd<TResult>(Func<IRespClient, Command<TResult>> commandFactory)
             where TResult : IRespResponse
         {
             return new Builder5<T1, T2, T3, T4, TResult>(parent, c1, c2, c3, c4, parent.CreateCommand(commandFactory));

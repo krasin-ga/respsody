@@ -15,6 +15,24 @@ namespace Respsody.Tests;
 public class ComboTests
 {
     [Fact]
+    public async Task InfersTypesForFourAndFiveFactoryCommands()
+    {
+        using var client = new RecordingClient();
+        using var response = await Combo.Build(client)
+            .Cmd(static c => c.CreateCommand<RespNumber>("INCR"))
+            .Cmd(static c => c.CreateCommand<RespNumber>("INCR"))
+            .Cmd(static c => c.CreateCommand<RespNumber>("INCR"))
+            .Cmd(static c => c.CreateCommand<RespNumber>("INCR"))
+            .Cmd(static c => c.CreateCommand<RespNumber>("INCR"))
+            .Execute();
+
+        Assert.Equal(5, client.Created);
+        Assert.Equal(5, client.Executed);
+        Assert.Equal(1, response.Value4.ToInt64());
+        Assert.Equal(1, response.Value5.ToInt64());
+    }
+
+    [Fact]
     public async Task FifthArgumentCommandIsCreatedAndExecutedExactlyOnce()
     {
         using var client = new RecordingClient();
