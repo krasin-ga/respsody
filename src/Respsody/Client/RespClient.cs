@@ -124,9 +124,15 @@ public sealed class RespClient(
         if (_structuredSocket is null)
             return ConnectThenExecuteCommand(command, cancellationToken);
 
-        if (_structuredSocket.IsDisposed)
+        return ExecuteFinalizedCommand(command, cancellationToken);
+    }
+
+    private ValueTask<T> ExecuteFinalizedCommand<T>(Command<T> command, CancellationToken cancellationToken)
+        where T : IRespResponse
+    {
+        if (_structuredSocket!.IsDisposed)
         {
-            command.Dispose();
+            command.OutgoingBuffer.FreeByDeliveryPipeline();
             throw new RespClientDisposedException();
         }
 
@@ -153,7 +159,15 @@ public sealed class RespClient(
             subAcks: subAcks,
             cancellationToken: cancellationToken);
 
-        _structuredSocket.Send(new TransmitUnit<Payload>(command.OutgoingBuffer, payload));
+        try
+        {
+            _structuredSocket.Send(new TransmitUnit<Payload>(command.OutgoingBuffer, payload));
+        }
+        catch (Exception exception)
+        {
+            command.OutgoingBuffer.FreeByDeliveryPipeline();
+            taskCompletionSource.SetException(exception);
+        }
 
         return taskCompletionSource.AsValueTask();
     }
@@ -162,20 +176,17 @@ public sealed class RespClient(
         where T : IRespResponse
     {
         if (_structuredSocket?.IsDisposed is true)
-        {
-            command.Dispose();
             throw new RespClientDisposedException();
-        }
+
+        var responseType = ResponseTypeMapping.GetResponseTypeEnum<T>();
+        if (responseType == ResponseType.Subscription)
+            throw new InvalidOperationException("Cannot pack subscription");
 
         command.FinalizeCommand();
 
         var responseCompletionSource = PooledValueTaskCompletionSource<T>.Create(
             _runContinuationsAsynchronously
         );
-
-        var responseType = ResponseTypeMapping.GetResponseTypeEnum<T>();
-        if (responseType == ResponseType.Subscription)
-            throw new InvalidOperationException("Cannot pack subscription");
 
         var payload = new Payload(
             respClient: this,
@@ -212,8 +223,17 @@ public sealed class RespClient(
         if (command.Timeout > 0)
             linkedCts.CancelAfter(command.Timeout);
 
-        await Start().WaitAsync(linkedCts.Token);
-        return await ExecuteCommand(command, linkedCts.Token);
+        try
+        {
+            await Start().WaitAsync(linkedCts.Token);
+        }
+        catch
+        {
+            command.OutgoingBuffer.FreeByDeliveryPipeline();
+            throw;
+        }
+
+        return await ExecuteFinalizedCommand(command, linkedCts.Token);
     }
 
     public void HandleIncoming(ReadyFrames<RespContext> readyFrames)
