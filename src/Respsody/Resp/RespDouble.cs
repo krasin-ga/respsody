@@ -26,41 +26,22 @@ public readonly struct RespDouble : IRespResponse
             && span.Length == bytesConsumed)
             return parsed;
 
-        return ParseLiteralsNaiveOrThrow(span);
+        return ParseLiteralOrThrow(span);
     }
 
-    private static double ParseLiteralsNaiveOrThrow(Span<byte> span)
+    private static double ParseLiteralOrThrow(ReadOnlySpan<byte> span)
     {
-        if (span.Length is not (3 or 4))
-            throw CreateFormatException(span);
-
-        const byte n = (byte)'n';
-        const byte f = (byte)'f';
-        const byte i = (byte)'i';
-        const byte plus = (byte)'+';
-        const byte minus = (byte)'-';
-
-        //(+|-)?(inf|nan)
-        switch (span[^1])
-        {
-            case n:
-                return double.NaN;
-            case f:
-                switch (span[0])
-                {
-                    case i:
-                    case plus:
-                        return double.PositiveInfinity;
-                    case minus:
-                        return double.NegativeInfinity;
-                }
-                break;
-        }
+        if (span.SequenceEqual("inf"u8) || span.SequenceEqual("+inf"u8))
+            return double.PositiveInfinity;
+        if (span.SequenceEqual("-inf"u8))
+            return double.NegativeInfinity;
+        if (span.SequenceEqual("nan"u8) || span.SequenceEqual("+nan"u8) || span.SequenceEqual("-nan"u8))
+            return double.NaN;
 
         throw CreateFormatException(span);
     }
 
-    private static FormatException CreateFormatException(Span<byte> span)
+    private static FormatException CreateFormatException(ReadOnlySpan<byte> span)
     {
         return new FormatException($"Can't parse `{DefaultRespEncoding.Value.GetString(span)}`");
     }
