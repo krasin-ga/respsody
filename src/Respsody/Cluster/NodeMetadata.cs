@@ -15,9 +15,9 @@ public record NodeMetadata(
 {
     public static NodeMetadata Parse(string line)
     {
-        // <id> <ip:port@cport[,hostname]> <flags> <master> <ping-sent> <pong-recv> <config-epoch> <link-state> <slot> <slot> ... <slot>
-
-        var split = line.Split(' ');
+        var split = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (split.Length < 8)
+            throw new FormatException("A CLUSTER NODES entry must contain at least eight fields.");
         var id = split[0];
         var address = split[1];
         var addressSplit = address.Split(',');

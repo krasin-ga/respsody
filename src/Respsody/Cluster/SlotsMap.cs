@@ -35,6 +35,9 @@ public class SlotsMap
             var nodeMetadata = clusterNode.Metadata;
             foreach (var range in nodeMetadata.Slots.Ranges)
             {
+                if (range.From > range.To || range.To >= MaxSlots)
+                    throw new FormatException($"Invalid slot range {range.From}-{range.To} for cluster node {clusterNode.Id}.");
+
                 if (range.State.StateKind != SpecialSlotState.Kind.None)
                 {
                     IsUnstable = true;
@@ -42,7 +45,11 @@ public class SlotsMap
                 }
 
                 foreach (var slot in range.GetSlots())
+                {
+                    if (_slotToNode[slot] is { } assigned && assigned.Id != clusterNode.Id)
+                        throw new FormatException($"Hash slot {slot} is assigned to multiple cluster nodes.");
                     _slotToNode[slot] = clusterNode;
+                }
             }
         }
     }
