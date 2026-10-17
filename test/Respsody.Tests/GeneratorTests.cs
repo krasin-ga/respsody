@@ -15,6 +15,49 @@ namespace Respsody.Tests;
 
 public class GeneratorTests
 {
+    [Fact]
+    public void ExposesCancellationOnExecutionAndPreservesLegacyBuilderCalls()
+    {
+        var result = Generate("""
+            using Respsody;
+            using Respsody.Client;
+            using Respsody.Resp;
+            using System.Threading;
+            namespace Generated;
+            [RespCommand("PING", ResponseType.String)]
+            public static class Definitions;
+            public static class Usage
+            {
+                public static void CompileCalls(IRespClient client, CancellationToken token)
+                {
+                    using var ordinary = client.PingCommand();
+                    using var legacy = client.PingCommand(cancellationToken: token);
+                    _ = client.Ping(cancellationToken: token);
+                }
+            }
+            """);
+
+        AssertCompiles(result);
+        var methods = result.Output.GetTypeByMetadataName("Generated.PING")!
+            .GetMembers("PingCommand").OfType<IMethodSymbol>().ToArray();
+        Assert.Contains(methods, method => method.Parameters.Length == 1 && method.GetAttributes().IsEmpty);
+        Assert.Contains(methods, method => method.Parameters.Length == 2
+            && method.GetAttributes().Single().AttributeClass!.Name == "ObsoleteAttribute");
+        var warning = Assert.Single(result.Output.GetDiagnostics().Where(diagnostic => diagnostic.Id == "CS0618"));
+        Assert.Contains("Pass cancellation to ExecuteCommand", warning.GetMessage());
+
+        var executionMethods = result.Run.GeneratedTrees.Single().GetRoot().DescendantNodes()
+            .OfType<MethodDeclarationSyntax>().Where(method => method.Identifier.ValueText is "Ping" or "PingVoid")
+            .ToArray();
+        Assert.Equal(2, executionMethods.Length);
+        Assert.All(executionMethods, method =>
+        {
+            var invocations = method.DescendantNodes().OfType<InvocationExpressionSyntax>().ToArray();
+            Assert.Single(invocations[0].ArgumentList.Arguments);
+            Assert.Equal("cancellationToken", invocations[1].ArgumentList.Arguments[1].ToString());
+        });
+    }
+
     [Theory]
     [InlineData("ECHO TEXT=`unfinished")]
     [InlineData("ECHO TEXT=`")]
@@ -204,7 +247,7 @@ public class GeneratorTests
 
         AssertCompiles(result);
         Assert.Equal(2, result.Output.GetTypeByMetadataName("Generated.ORDER")!
-            .GetMembers("OrderCommand").Length);
+            .GetMembers("OrderCommand").OfType<IMethodSymbol>().Count(method => method.GetAttributes().IsEmpty));
     }
 
     private static GenerationResult Generate(string source)

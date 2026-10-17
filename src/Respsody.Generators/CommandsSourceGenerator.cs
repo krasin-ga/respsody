@@ -130,8 +130,7 @@ internal class CommandsSourceGenerator : IIncrementalGenerator
 
             context.AllArgsAreFixedSize = allArgsFixedSize;
 
-            @class = @class.AddMembers(
-                Build.ExtensionMethodForCommand(
+            var builderMethod = Build.ExtensionMethodForCommand(
                     command: command,
                     isPublic: commandContext.IsPublic,
                     methodNamePreference: commandContext.MethodNamePreference,
@@ -139,7 +138,11 @@ internal class CommandsSourceGenerator : IIncrementalGenerator
                     parameters: parameters,
                     countExpressions: countExpressions,
                     groups: reducedGroups,
-                    allArgsFixedSize: allArgsFixedSize),
+                    allArgsFixedSize: allArgsFixedSize);
+
+            @class = @class.AddMembers(
+                builderMethod,
+                Build.LegacyCancellationOverload(builderMethod),
                 Build.ExtensionMethodForCommandExecution(
                     command: command,
                     isPublic: commandContext.IsPublic,

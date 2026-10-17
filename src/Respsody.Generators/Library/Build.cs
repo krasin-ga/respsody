@@ -112,7 +112,7 @@ internal static class Build
                 TokenList(isPublic ? Token(SyntaxKind.PublicKeyword) : Token(SyntaxKind.InternalKeyword),
                           Token(SyntaxKind.StaticKeyword)))
             .WithParameterList(
-                ParameterList(SeparatedList(parameters))
+                ParameterList(SeparatedList(parameters.Concat([Constants.CancellationTokenParameter])))
             );
 
         var body = Block();
@@ -140,15 +140,6 @@ internal static class Build
     List<List<NodeWithBuilder>> groups,
     bool allArgsFixedSize)
     {
-        parameters.Add(
-            Parameter(Identifier("cancellationToken"))
-                .WithType(ParseTypeName("CancellationToken"))
-                .WithDefault(EqualsValueClause(
-                                 LiteralExpression(
-                                     SyntaxKind.DefaultLiteralExpression,
-                                     Token(SyntaxKind.DefaultKeyword))))
-        );
-
         var methodIdentifier = (methodNamePreference ?? CultureInfo.InvariantCulture.TextInfo.ToTitleCase(
             command.ToLowerInvariant()
         )) + "Command";
@@ -223,6 +214,20 @@ internal static class Build
         return method.WithBody(body);
     }
 
+
+    public static MethodDeclarationSyntax LegacyCancellationOverload(MethodDeclarationSyntax builder)
+    {
+        var arguments = string.Join(",", builder.ParameterList.Parameters.Select(parameter => parameter.Identifier));
+        var obsolete = Attribute(IdentifierName("Obsolete"))
+            .AddArgumentListArguments(AttributeArgument(LiteralExpression(
+                SyntaxKind.StringLiteralExpression,
+                Literal("Command builders do not execute commands. Pass cancellation to ExecuteCommand or the execution extension instead."))));
+
+        return builder
+            .AddParameterListParameters(Constants.CancellationTokenParameter.WithDefault(null))
+            .WithAttributeLists(SingletonList(AttributeList(SingletonSeparatedList(obsolete))))
+            .WithBody(Block(ParseStatement($"return {builder.Identifier}({arguments});")));
+    }
 
     public static string ToLiteral(this string text)
     {
@@ -386,6 +391,13 @@ internal static class Build
                     TokenList(
                         Token(SyntaxKind.ThisKeyword)))
                 .WithType(ParseTypeName("IRespClient"));
+
+        public static readonly ParameterSyntax CancellationTokenParameter =
+            Parameter(Identifier("cancellationToken"))
+                .WithType(ParseTypeName("CancellationToken"))
+                .WithDefault(EqualsValueClause(LiteralExpression(
+                    SyntaxKind.DefaultLiteralExpression,
+                    Token(SyntaxKind.DefaultKeyword))));
 
         public static readonly string GeneratorVersion = typeof(Build).Assembly.GetName().Version.ToString();
     }
