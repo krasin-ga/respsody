@@ -72,7 +72,7 @@ public readonly struct RespArray(RespAggregate respAggregate, DisposalGuard guar
 
     public struct Enumerator<T>(RespAggregate data, Func<OwnedRespValueVariant, T> convert, DisposalGuard guard) : IEnumerator<T>
     {
-        private int _index = -1;
+        private int _index;
         private T _current = default!;
 
         public bool MoveNext()
@@ -92,7 +92,7 @@ public readonly struct RespArray(RespAggregate respAggregate, DisposalGuard guar
 
         public void Reset()
         {
-            _index = -1;
+            _index = 0;
             _current = default!;
         }
 
