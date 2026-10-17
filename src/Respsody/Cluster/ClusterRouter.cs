@@ -343,8 +343,10 @@ public sealed class ClusterRouter : IDisposable
         {
             ObjectDisposedException.ThrowIf(outer._isDisposed, outer);
             var clusterState = outer._state ?? throw new RespClusterNotInitializedException();
-            var nodes = clusterState.Nodes;
-            var node = nodes[Random.Shared.Next(0, nodes.Count)];
+            var nodes = clusterState.PrimaryNodes;
+            if (nodes.Length == 0)
+                throw new RespClusterCommandExecutionException("No primary cluster nodes are available.");
+            var node = nodes[Random.Shared.Next(nodes.Length)];
             return PickNodeForRole(node);
         }
 
