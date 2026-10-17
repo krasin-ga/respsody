@@ -441,9 +441,27 @@ public sealed class ClusterRouter : IDisposable
 
                 using var combo = new Combo(endpointClient, command.Timeout);
                 using var asking = endpointClient.CreateCommand<RespVoid>("ASKING").WithTimeout(command.Timeout);
-                var askingResponse = endpointClient.Pack(combo, asking, cancellationToken);
-                var commandResponse = endpointClient.Pack(combo, command, cancellationToken);
-                combo.Execute();
+                ComboCommand<RespVoid>? askingResponse = null;
+                ComboCommand<T>? commandResponse = null;
+                try
+                {
+                    askingResponse = endpointClient.Pack(combo, asking, cancellationToken);
+                    commandResponse = endpointClient.Pack(combo, command, cancellationToken);
+                    combo.Execute();
+                }
+                catch
+                {
+                    try
+                    {
+                        combo.Dispose();
+                    }
+                    finally
+                    {
+                        askingResponse?.Discard();
+                        commandResponse?.Discard();
+                    }
+                    throw;
+                }
 
                 Exception? askingError = null;
                 try
