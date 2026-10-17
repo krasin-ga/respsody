@@ -15,6 +15,7 @@ public sealed class ClusterRouter : IDisposable
 {
     private readonly RoleRouter _anyRouter;
     private readonly CancellationTokenSource _cancellation;
+    private readonly object _lifecycleLock = new();
     private readonly MemoryBlocks _memoryBlocks;
     private readonly ClusterRouterOptions _options;
     private readonly int _outgoingBlockSize;
@@ -24,9 +25,9 @@ public sealed class ClusterRouter : IDisposable
     private readonly TimeSpan _syncInterval;
     private bool _isInitialized;
     private int _isSyncing;
-    private ClusterState? _state;
+    private volatile ClusterState? _state;
     private int _syncTimerStarted;
-    private bool _isDisposed;
+    private volatile bool _isDisposed;
 
     public IReadOnlyDictionary<string, object> Metadata => _options.Metadata;
 
@@ -63,31 +64,43 @@ public sealed class ClusterRouter : IDisposable
         if (!isSucceeded)
             throw new RespClusterInitializationFailedException(exceptions);
 
-        _isInitialized = true;
-        if (Interlocked.CompareExchange(ref _syncTimerStarted, 1, 0) != 0)
-            return;
+        lock (_lifecycleLock)
+        {
+            ObjectDisposedException.ThrowIf(_isDisposed, this);
+            _isInitialized = true;
+            if (Interlocked.CompareExchange(ref _syncTimerStarted, 1, 0) != 0)
+                return;
 
-        _ = Task.Run(SyncPeriodically);
+            _ = Task.Run(SyncPeriodically);
+        }
     }
 
     private async Task SyncPeriodically()
     {
         using var repeatableTimer = new PeriodicTimer(_syncInterval);
-        while (await repeatableTimer.WaitForNextTickAsync(_cancellation.Token))
-            await SyncClusterState();
+        try
+        {
+            while (await repeatableTimer.WaitForNextTickAsync(_cancellation.Token))
+                await SyncClusterState();
+        }
+        catch (OperationCanceledException) when (_isDisposed) { }
+        catch (ObjectDisposedException) when (_isDisposed) { }
     }
 
     public async Task<(bool IsSucceeded, IReadOnlyList<Exception> Exceptions)> SyncClusterState()
     {
+        ObjectDisposedException.ThrowIf(_isDisposed, this);
+
         if (Interlocked.CompareExchange(ref _isSyncing, 1, 0) != 0)
             return (false, []);
 
-        if (_state is null)
+        var state = _state;
+        if (state is null)
             throw new RespClusterNotInitializedException();
 
         using Defer _ = new(() => _isSyncing = 0);
 
-        var endpoints = (_state?.Nodes.Select(n => n.Metadata.Address?.FormatEndpoint()) ?? [])
+        var endpoints = state.Nodes.Select(n => n.Metadata.Address?.FormatEndpoint())
             .Concat(_options.SeedEndpoints).Where(e => !string.IsNullOrWhiteSpace(e));
 
         return await SyncClusterStateInternal(endpoints!);
@@ -99,11 +112,16 @@ public sealed class ClusterRouter : IDisposable
         var updated = false;
         foreach (var seedEndpoint in endpoints.OrderBy(static _ => Random.Shared.Next()))
         {
+            ObjectDisposedException.ThrowIf(_isDisposed, this);
             try
             {
                 await UpdateClusterStateFromSeed(seedEndpoint);
                 updated = true;
                 break;
+            }
+            catch (Exception) when (_isDisposed)
+            {
+                throw new ObjectDisposedException(nameof(ClusterRouter));
             }
             catch (Exception exception)
             {
@@ -112,10 +130,9 @@ public sealed class ClusterRouter : IDisposable
             }
         }
 
-        if (updated && _state is { Nodes.Count: > 0 })
+        if (updated && _state is { Nodes.Count: > 0 } state)
         {
-            _ = Task.WhenAll(_state.Nodes.Select(n => n.Client.Start()));
-            _options.ClusterRouterHandler?.OnClusterStateSynced(this, _state);
+            _options.ClusterRouterHandler?.OnClusterStateSynced(this, state);
 
             return (true, exceptions ?? []);
         }
@@ -135,14 +152,20 @@ public sealed class ClusterRouter : IDisposable
         var published = false;
         try
         {
-            await client.Start();
+            Task start;
+            lock (_lifecycleLock)
+            {
+                ObjectDisposedException.ThrowIf(_isDisposed, this);
+                start = client.Start();
+            }
+            await start.WaitAsync(_cancellation.Token);
 
             var connectionMetadata = new ClusterNodeConnectionMetadata(client.Metadata!);
             if (!connectionMetadata.ServerMode.IsCluster)
                 throw new RespConnectionException("Seed node's mode must be `cluster`");
 
             using var nodesCommand = client.CreateCommand<RespString>("CLUSTER").Arg("NODES");
-            using var response = await client.ExecuteCommand(nodesCommand);
+            using var response = await client.ExecuteCommand(nodesCommand, _cancellation.Token);
             var responseString = response.ToString() ?? throw new RespUnexpectedOperationException(
                 "Failed to get cluster nodes because response is null");
 
@@ -169,8 +192,14 @@ public sealed class ClusterRouter : IDisposable
             foreach (var clusterNode in activeClusterNodes)
                 clusterNode.AssignReplicas(activeClusterNodes);
 
-            _state = new ClusterState(activeClusterNodes, new SlotsMap(activeClusterNodes));
-            published = true;
+            var nextState = new ClusterState(activeClusterNodes, new SlotsMap(activeClusterNodes));
+            lock (_lifecycleLock)
+            {
+                ObjectDisposedException.ThrowIf(_isDisposed, this);
+                _state = nextState;
+                published = true;
+                _ = Task.WhenAll(nextState.Nodes.Select(n => n.Client.Start()));
+            }
 
             foreach (var node in currentState?.Nodes ?? [])
                 if (!activeClusterNodes.Any(n => ReferenceEquals(n.Client, node.Client)))
@@ -186,6 +215,9 @@ public sealed class ClusterRouter : IDisposable
 
     private void OnRespError(RespErrorResponseException exception)
     {
+        if (_isDisposed)
+            return;
+
         var state = _state;
         if (state is null)
             return;
@@ -219,10 +251,18 @@ public sealed class ClusterRouter : IDisposable
 
     public void Dispose()
     {
-        _isDisposed = true;
+        ClusterState? state;
+        lock (_lifecycleLock)
+        {
+            if (_isDisposed)
+                return;
+            _isDisposed = true;
+            state = _state;
+            _state = null;
+        }
         _cancellation.Cancel();
 
-        foreach (var node in _state?.Nodes ?? [])
+        foreach (var node in state?.Nodes ?? [])
             node.Client.Dispose();
     }
 
@@ -283,6 +323,7 @@ public sealed class ClusterRouter : IDisposable
         public Command<T> CreateCommand<T>(string name, bool @unsafe = false)
             where T : IRespResponse
         {
+            ObjectDisposedException.ThrowIf(outer._isDisposed, outer);
             return Command<T>.GetCommand().Init(outer._memoryBlocks, outer._outgoingBlockSize, name, clusterMode: true, @unsafe);
         }
 
@@ -299,6 +340,7 @@ public sealed class ClusterRouter : IDisposable
 
         public RespClient PickRandomNode()
         {
+            ObjectDisposedException.ThrowIf(outer._isDisposed, outer);
             var clusterState = outer._state ?? throw new RespClusterNotInitializedException();
             var nodes = clusterState.Nodes;
             var node = nodes[Random.Shared.Next(0, nodes.Count)];
@@ -307,6 +349,7 @@ public sealed class ClusterRouter : IDisposable
 
         public RespClient PickNode(ushort hashSlot)
         {
+            ObjectDisposedException.ThrowIf(outer._isDisposed, outer);
             var clusterState = outer._state ?? throw new RespClusterNotInitializedException();
             var node = clusterState.Map.GetNode(hashSlot);
             return PickNodeForRole(node);
@@ -314,6 +357,7 @@ public sealed class ClusterRouter : IDisposable
 
         public RespClient PickNode(Key key)
         {
+            ObjectDisposedException.ThrowIf(outer._isDisposed, outer);
             var clusterState = outer._state ?? throw new RespClusterNotInitializedException();
             var node = clusterState.Map.GetNode(key.CalculateHashSlot());
             return PickNodeForRole(node);
@@ -322,6 +366,7 @@ public sealed class ClusterRouter : IDisposable
         private ValueTask<T> ExecuteOn<T>(Command<T> command, CancellationToken cancellationToken)
             where T : IRespResponse
         {
+            ObjectDisposedException.ThrowIf(outer._isDisposed, outer);
             var clusterState = outer._state ?? throw new RespClusterNotInitializedException();
 
             ClusterNode? destination = null;
