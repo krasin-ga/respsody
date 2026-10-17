@@ -30,11 +30,7 @@ public class PubSubTest(RedisSingleNodeFixture fixture, ITestOutputHelper @out) 
                 PushReceiver = testPushReceiver,
                 Handler = new TestHandler(output: @out, onConnected: OnClientConnected),
             },
-            new DefaultConnectionProcedure(new ConnectionOptions
-            {
-                AuthOptions = new AuthOptions { Password = fixture.GetPassword() },
-                Endpoint = fixture.GetStringEndpoint()
-            }));
+            fixture.CreateConnectionProcedure());
 
         await SubscribeToChannels(client);
 
