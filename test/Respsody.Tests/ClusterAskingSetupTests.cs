@@ -27,9 +27,12 @@ public class ClusterAskingSetupTests
         source.Respond = (arguments, _) => Task.FromResult(arguments[0] == "CLUSTER"
             ? ClusterTestServer.Bulk(topology)
             : $"-ASK 12182 {destination.Address}\r\n");
-        destination.Respond = (_, _) =>
+        destination.Respond = (arguments, _) =>
         {
-            Interlocked.Increment(ref redirectedCommands);
+            if (arguments[0] == "CLUSTER")
+                return Task.FromResult(ClusterTestServer.Bulk(topology));
+            if (arguments[0] is "ASKING" or "GET")
+                Interlocked.Increment(ref redirectedCommands);
             return Task.FromResult("+OK\r\n");
         };
         var handler = new FailingSetupHandler(disposeBeforeSubmission);
