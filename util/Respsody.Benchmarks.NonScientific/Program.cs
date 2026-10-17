@@ -167,15 +167,15 @@ static async Task<BenchmarkResult> RunTest<T>(
 
     for (var i = 0; i < iterations; i++)
     {
-        var beforeAllocs = GC.GetTotalAllocatedBytes(precise: true);
         var beforeCpuTime = CpuTime.GetActualValue();
+        var beforeAllocs = GC.GetTotalAllocatedBytes(precise: true);
 
         sw.Restart();
         await test(target, values);
         sw.Stop();
 
-        var afterCpuTime = CpuTime.GetActualValue();
         var afterAllocs = GC.GetTotalAllocatedBytes(precise: true);
+        var afterCpuTime = CpuTime.GetActualValue();
 
         var allocationDelta = new Delta<long>(beforeAllocs, afterAllocs);
         if (!allocationDelta.IsIncreasingOrEq)
@@ -204,7 +204,7 @@ static async Task<BenchmarkResult> RunTest<T>(
         TotalElapsed: measurements.Aggregate(TimeSpan.Zero, (a, b) => a + b.Elapsed),
         BestRun: measurements.Select(r => r.Elapsed).Min(),
         CpuTime: measurements.Aggregate(TimeSpan.Zero, (acc, m) => acc + (m.Cpu.After - m.Cpu.Before)),
-        MinWastedCpuTime: measurements.Select(m => m.Cpu.After - m.Cpu.Before).Where(t => t > TimeSpan.Zero).Min(),
+        MinWastedCpuTime: measurements.Select(m => m.Cpu.After - m.Cpu.Before).Where(t => t > TimeSpan.Zero).DefaultIfEmpty().Min(),
         TotalAllocated: new SizeInBytes(measurements.Aggregate(0L, (acc, m) => acc + (m.Allocations.After - m.Allocations.Before))),
         TotalMemory: new SizeInBytes(GC.GetTotalMemory(forceFullCollection: false))
     );
