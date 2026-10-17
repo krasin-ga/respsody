@@ -58,8 +58,7 @@ public class PubSubTest(RedisSingleNodeFixture fixture, ITestOutputHelper @out) 
     private async ValueTask OnClientConnected(IRespClient client, int generation)
     {
         await SubscribeToChannels(client);
-        _subscribed.TrySetResult();
-        if (generation > 1)
+        if (!_subscribed.TrySetResult())
             _reconnected.TrySetResult();
     }
 
