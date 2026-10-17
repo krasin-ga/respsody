@@ -98,7 +98,22 @@ public sealed class RespClient(
 
             var ticks = Environment.TickCount;
             foreach (var responseData in _responseQueue)
-                responseData.TryExpire(ticks);
+            {
+                try
+                {
+                    responseData.TryExpire(ticks);
+                }
+                catch (Exception exception)
+                {
+                    try
+                    {
+                        HandleConnectionError(exception);
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
         }
     }
 
@@ -553,7 +568,17 @@ public sealed class RespClient(
                 return;
             }
 
-            respClient._clientHandler?.OnCommandExecuted(respClient, ticks - startTicks, command, _ctx);
+            try
+            {
+                respClient._clientHandler?.OnCommandExecuted(respClient, ticks - startTicks, command, _ctx);
+            }
+            catch (Exception exception)
+            {
+                aggregate.Dispose();
+                attribute?.Dispose();
+                taskCompletionSource.SetException(exception);
+                return;
+            }
 
             switch (responseType)
             {
@@ -606,7 +631,17 @@ public sealed class RespClient(
                 return;
             }
 
-            respClient._clientHandler?.OnCommandExecuted(respClient, ticks - startTicks, command, _ctx);
+            try
+            {
+                respClient._clientHandler?.OnCommandExecuted(respClient, ticks - startTicks, command, _ctx);
+            }
+            catch (Exception exception)
+            {
+                frame.Dispose();
+                attribute?.Dispose();
+                taskCompletionSource.SetException(exception);
+                return;
+            }
 
             switch (responseType)
             {
