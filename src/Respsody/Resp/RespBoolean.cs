@@ -34,7 +34,16 @@ public readonly struct RespBoolean : IRespResponse
 
     public bool ToBool()
     {
-        return _frame.Span[1] == 't';
+        var span = _frame.Span;
+        if (span.Length == 4)
+        {
+            if (span[1] == 't')
+                return true;
+            if (span[1] == 'f')
+                return false;
+        }
+
+        throw new FormatException("Invalid RESP boolean.");
     }
 
     public void Dispose()
