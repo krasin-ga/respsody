@@ -233,7 +233,7 @@ public sealed class StructuredSocket<TIncoming, TPayload> : IDisposable
         int length,
         CancellationToken token)
     {
-        await socket.SendAsync(
+        await SocketWriter.SendAllAsync(socket,
             bytes.AsMemory(0, length),
             _options.SendingFlags,
             token);
@@ -245,7 +245,7 @@ public sealed class StructuredSocket<TIncoming, TPayload> : IDisposable
     {
         try
         {
-            await socket.SendAsync(page.AsSegmentList(), _options.SendingFlags);
+            await SocketWriter.SendAllAsync(socket, page.AsSegmentList(), _options.SendingFlags);
         }
         finally
         {
