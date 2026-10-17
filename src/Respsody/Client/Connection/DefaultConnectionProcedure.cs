@@ -36,20 +36,20 @@ public class DefaultConnectionProcedure(ConnectionOptions connectionOptions)
             await socket.ConnectAsync(endPoint, cts.Token);
             using var socketRpc = new DirectSocketRpc(socket);
             var authOptions = connectionOptions.AuthOptions;
-    
+
             using var helloReply = await socketRpc.Rpc(
                 "HELLO",
                 c =>
                 {
                     c.Arg(SupportedProtocolVersion);
-    
+
                     if (authOptions is { } && !string.IsNullOrWhiteSpace(authOptions.Password))
                     {
                         c.Token("AUTH");
                         c.Arg(authOptions.UserName ?? "default");
                         c.Arg(authOptions.Password);
                     }
-    
+
                     if (connectionOptions.ClientName is { } clientName)
                     {
                         c.Token("SETNAME");
@@ -57,7 +57,7 @@ public class DefaultConnectionProcedure(ConnectionOptions connectionOptions)
                     }
                 },
                 cts.Token);
-    
+
             var metadata = helloReply.Variant.ToRespMap().ToMapWithStringKey();
             return new ConnectedSocket(socket, new ConnectionMetadata(endPoint, metadata));
         }

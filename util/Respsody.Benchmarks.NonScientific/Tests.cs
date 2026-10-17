@@ -172,7 +172,7 @@ public class Tests(IDatabaseAsync db, IRespClient client)
 
         return j + j2;
     }
-    
+
     public async Task<int> SetGet_WhenEach_WithJsonSerializeDeserialize(Target target, SampleJson[] values)
     {
         if (target is Target.Respsody)
@@ -357,4 +357,3 @@ public class Tests(IDatabaseAsync db, IRespClient client)
         }
     }
 }
-

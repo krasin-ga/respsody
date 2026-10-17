@@ -82,9 +82,9 @@ public sealed class StructuredSocket<TIncoming, TPayload> : IDisposable
                     var currentGeneration = ++connectionGeneration;
                     using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
                     using var disconnectedBeatCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
-    
+
                     var expirationCheck = SafeRun(() => HeartbeatLoop(disconnectedBeatCts.Token));
-    
+
                     ConnectedSocket connectedSocket;
                     try
                     {
@@ -96,10 +96,10 @@ public sealed class StructuredSocket<TIncoming, TPayload> : IDisposable
                         await expirationCheck;
                         throw;
                     }
-    
+
                     using var socket = connectedSocket.Socket;
                     using var cancellation = linkedCts.Token.UnsafeRegister(static state => ((Socket)state!).Dispose(), socket);
-    
+
                     try
                     {
                         await _handler.InitializeConnection(connectedSocket, currentGeneration, linkedCts.Token);
@@ -110,7 +110,7 @@ public sealed class StructuredSocket<TIncoming, TPayload> : IDisposable
                         await disconnectedBeatCts.CancelAsync();
                         await expirationCheck;
                     }
-    
+
                     var receivingTask = SafeRun(() => ReceivingLoop(socket, linkedCts.Token));
                     var sendingTask = SafeRun(() => SendingLoop(socket, currentGeneration, linkedCts.Token));
                     if (await SafeRun(() => _handler.OnConnected(currentGeneration, linkedCts.Token).AsTask()) is { } connectionHandlerException)
@@ -118,13 +118,13 @@ public sealed class StructuredSocket<TIncoming, TPayload> : IDisposable
                         _handler.HandleConnectionError(new RespOnConnectedCallbackException(connectionHandlerException));
                         await linkedCts.CancelAsync();
                     }
-    
+
                     var interruptionException = await await Task.WhenAny(receivingTask, sendingTask);
                     await linkedCts.CancelAsync();
-    
+
                     foreach (var exception in await Task.WhenAll(receivingTask, sendingTask))
                         interruptionException ??= exception;
-    
+
                     if (interruptionException is { })
                         _handler.OnDisconnected(interruptionException, currentGeneration);
                 }
