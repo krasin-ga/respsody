@@ -20,7 +20,7 @@ public class ReliabilityTests(RedisSingleNodeFixture fixture, ITestOutputHelper 
     [InlineData(100)]
     public async Task ShouldBeProtectedAgainstMultipleDisposals(int iterations)
     {
-        var client = await new RespClientFactory()
+        using var client = await new RespClientFactory()
             .Create(
                 new RespClientOptions
                 {
