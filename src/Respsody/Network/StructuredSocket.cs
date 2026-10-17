@@ -254,23 +254,23 @@ public sealed class StructuredSocket<TIncoming, TPayload> : IDisposable
         }
     }
 
-    private async ValueTask SendInternal(
+    private ValueTask SendInternal(
         Socket socket,
         byte[] bytes,
         int length,
         CancellationToken token)
     {
-        await SocketWriter.SendAllAsync(socket,
+        return SocketWriter.SendAllAsync(socket,
             bytes.AsMemory(0, length),
             _options.SendingFlags,
             token);
     }
 
-    private async ValueTask SendInternal(
+    private ValueTask SendInternal(
         Socket socket,
         OutgoingBuffer page)
     {
-        await SocketWriter.SendAllAsync(socket, page.AsSegmentList(), _options.SendingFlags);
+        return SocketWriter.SendAllAsync(socket, page.AsSegmentList(), _options.SendingFlags);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
