@@ -18,7 +18,8 @@ public sealed class RespClient(
     : IDirectRespClient, IStructuredSocketHandler<RespContext>, IDisposable
 {
     private readonly IRespClientHandler? _clientHandler = options.Handler;
-    private readonly SemaphoreSlim _initialConnectionLock = new(1);
+    private readonly object _initialConnectionLock = new();
+    private volatile bool _disposed;
     private readonly MemoryBlocks _memoryBlocks = options.MemoryBlocks;
     private readonly int _outgoingBlockSize = options.OutgoingMemoryBlockSize;
     private readonly IRespPushReceiver _pushReceiver = options.PushReceiver;
@@ -42,46 +43,43 @@ public sealed class RespClient(
         if (connectionProcedure.Timeout > TimeSpan.Zero)
             cts.CancelAfter(connectionProcedure.Timeout);
 
-        await _initialConnectionLock.WaitAsync(cts.Token);
-
-        if (_structuredSocket is not null)
-        {
-            _initialConnectionLock.Release();
-
-            await _structuredSocket.Connected.WaitAsync(cts.Token);
-            return;
-        }
-
         try
         {
-            _structuredSocket = new StructuredSocket<RespContext, Payload>(
-                connectionProcedure,
-                new RespFraming(_memoryBlocks, options.IncomingMemoryBlockSize, options.ArrayPool),
-                options.SocketOption,
-                this
-            );
+            lock (_initialConnectionLock)
+            {
+                if (_disposed)
+                    throw new RespClientDisposedException();
 
-            if (_clientHandler != null)
-                _handlersHandle = GCHandle.Alloc(
-                    _memoryBlocks.AddEventHandlers(
-                        onCreate: _clientHandler.OnMemoryBlockCreated,
-                        onDestruct: _clientHandler.OnMemoryBlockDestructed,
-                        onResurrected: _clientHandler.OnMemoryBlockResurrected
-                    ),
-                    GCHandleType.Normal);
-            _structuredSocket.Start();
-            _ = Task.Run(CheckExpiredMessages, CancellationToken.None);
+                if (_structuredSocket is null)
+                {
+                    _structuredSocket = new StructuredSocket<RespContext, Payload>(
+                        connectionProcedure,
+                        new RespFraming(_memoryBlocks, options.IncomingMemoryBlockSize, options.ArrayPool),
+                        options.SocketOption,
+                        this
+                    );
+
+                    if (_clientHandler != null)
+                        _handlersHandle = GCHandle.Alloc(
+                            _memoryBlocks.AddEventHandlers(
+                                onCreate: _clientHandler.OnMemoryBlockCreated,
+                                onDestruct: _clientHandler.OnMemoryBlockDestructed,
+                                onResurrected: _clientHandler.OnMemoryBlockResurrected
+                            ),
+                            GCHandleType.Normal);
+                    _structuredSocket.Start();
+                    _ = CheckExpiredMessages();
+                }
+            }
 
             await _structuredSocket.Connected.WaitAsync(cts.Token);
 
         }
-        catch (TaskCanceledException tcs)
+        catch (OperationCanceledException exception)
         {
-            throw new TimeoutException($"Connection timed out after {connectionProcedure.Timeout}", tcs);
-        }
-        finally
-        {
-            _initialConnectionLock.Release();
+            if (_disposed)
+                throw new RespClientDisposedException();
+            throw new TimeoutException($"Connection timed out after {connectionProcedure.Timeout}", exception);
         }
     }
 
@@ -90,7 +88,7 @@ public sealed class RespClient(
         if (options.TimeoutCheckInterval <= TimeSpan.Zero)
             return;
 
-        var timer = new PeriodicTimer(options.TimeoutCheckInterval);
+        using var timer = new PeriodicTimer(options.TimeoutCheckInterval);
 
         while (await timer.WaitForNextTickAsync())
         {
@@ -391,10 +389,15 @@ public sealed class RespClient(
 
     public void Dispose()
     {
-        _initialConnectionLock.Dispose();
-        _attribute?.Dispose();
-        _structuredSocket?.Dispose();
-        _handlersHandle?.Free();
+        lock (_initialConnectionLock)
+        {
+            if (_disposed)
+                return;
+            _disposed = true;
+            _structuredSocket?.Dispose();
+            _handlersHandle?.Free();
+            _handlersHandle = null;
+        }
     }
 
     internal struct Payload(
