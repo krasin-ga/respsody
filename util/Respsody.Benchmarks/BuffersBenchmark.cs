@@ -10,16 +10,36 @@ public class BuffersBenchmark
     [ThreadStatic]
     private static byte[]? _buffer;
     private static readonly byte[]? Buffer2 = new byte[1024*1024];
-    private readonly byte[] _testDataToCopy = Encoding.UTF8.GetBytes(new string('1', 256*1024));
+    private byte[] _testDataToCopy = null!;
     private static int _flag;
 
-    [Benchmark]
-    public int StackAlloc()
-    {
-        Span<byte> buffer = stackalloc byte[_testDataToCopy.Length];
+    [Params(256, 4096, 256 * 1024)]
+    public int MessageSize { get; set; } = 256 * 1024;
 
-        _testDataToCopy.AsSpan().CopyTo(buffer);
-        return _testDataToCopy.Length;
+    [GlobalSetup]
+    public void Setup()
+    {
+        _testDataToCopy = Encoding.UTF8.GetBytes(new string('1', MessageSize));
+    }
+
+    [Benchmark]
+    public int StackOrPool()
+    {
+        byte[]? pooled = null;
+        Span<byte> buffer = _testDataToCopy.Length <= 4096
+            ? stackalloc byte[_testDataToCopy.Length]
+            : (pooled = ArrayPool<byte>.Shared.Rent(_testDataToCopy.Length));
+
+        try
+        {
+            _testDataToCopy.AsSpan().CopyTo(buffer);
+            return _testDataToCopy.Length;
+        }
+        finally
+        {
+            if (pooled is not null)
+                ArrayPool<byte>.Shared.Return(pooled);
+        }
     }
 
     [Benchmark]
