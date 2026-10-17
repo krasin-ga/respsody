@@ -64,6 +64,7 @@ public class RespFrameAggregationStrategy(RespAggregatesPool slicesPool)
 
             var streamedString = _streamedString;
             _streamedString = null;
+            frame.Dispose();
 
             return AddOrReturn(new RespValueVariant(streamedString), out value);
         }
