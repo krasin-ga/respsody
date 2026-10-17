@@ -36,7 +36,15 @@ public class RedisSingleNodeFixture : IAsyncLifetime
                 RedisPassword)
             .Build();
 
-        await _container.StartAsync();
+        try
+        {
+            await _container.StartAsync();
+        }
+        catch
+        {
+            await DisposeAsync();
+            throw;
+        }
     }
 
     public async Task Restart()
@@ -47,9 +55,10 @@ public class RedisSingleNodeFixture : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        if (_container is { })
-            await _container.StopAsync();
-
+        var container = _container;
+        _container = null;
+        if (container is not null)
+            await container.DisposeAsync();
     }
 
     public string GetStringEndpoint()

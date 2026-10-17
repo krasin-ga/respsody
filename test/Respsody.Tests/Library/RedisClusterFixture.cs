@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Containers;
@@ -35,6 +36,19 @@ public class RedisClusterFixture : IAsyncLifetime
         => RedisPassword;
 
     public async Task InitializeAsync()
+    {
+        try
+        {
+            await InitializeClusterAsync();
+        }
+        catch
+        {
+            await DisposeAsync();
+            throw;
+        }
+    }
+
+    private async Task InitializeClusterAsync()
     {
         _network = new NetworkBuilder()
             .Build();
@@ -98,10 +112,18 @@ public class RedisClusterFixture : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        foreach (var (container, _) in _redisNodes)
-            await container.StopAsync();
-
-        if (_network != null)
-            await _network.DeleteAsync();
+        var nodes = _redisNodes.ToArray();
+        _redisNodes.Clear();
+        var network = _network;
+        _network = null;
+        try
+        {
+            await Task.WhenAll(nodes.Select(node => node.Container.DisposeAsync().AsTask()));
+        }
+        finally
+        {
+            if (network is not null)
+                await network.DisposeAsync();
+        }
     }
 }
