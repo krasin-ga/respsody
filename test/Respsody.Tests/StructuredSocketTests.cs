@@ -14,6 +14,39 @@ namespace Respsody.Tests;
 
 public class StructuredSocketTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DisposalCancelsQueuedCommandsAndIsIdempotent(bool start)
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var unusedSocket = new Socket(SocketType.Stream, ProtocolType.Tcp);
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var blocks = new MemoryBlocks();
+        var framing = new RespFraming(blocks, 4096);
+        var socket = new StructuredSocket<RespContext, Payload>(new Connection(unusedSocket, gate.Task), framing,
+            new StructuredSocketOptions { HeartbeatInterval = TimeSpan.FromMilliseconds(10) }, new Handler());
+        var payload = new Payload();
+        var page = Page(blocks, (byte)'A');
+        socket.Send(new TransmitUnit<Payload>(page, payload));
+        if (start)
+        {
+            socket.Start();
+            await payload.Checked.Task.WaitAsync(deadline.Token);
+        }
+
+        socket.Dispose();
+        socket.Dispose();
+        await socket.Completion.WaitAsync(deadline.Token);
+
+        Assert.Equal(1, payload.Cancellations);
+        var reused = blocks.LeaseLinked(4096, false, 0);
+        Assert.Same(page, reused);
+        reused.Commit();
+        reused.FreeByOwner();
+        reused.FreeByDeliveryPipeline();
+    }
+
     [Fact]
     public async Task LiveBatchSurvivesDisconnectedExpiration()
     {
@@ -26,7 +59,7 @@ public class StructuredSocketTests
         using var receiver = await listener.AcceptAsync(deadline.Token);
         var connect = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var blocks = new MemoryBlocks();
-        using var framing = new RespFraming(blocks, 4096);
+        var framing = new RespFraming(blocks, 4096);
         var handler = new Handler();
         using var socket = new StructuredSocket<RespContext, Payload>(new Connection(sender, connect.Task), framing,
             new StructuredSocketOptions { HeartbeatInterval = TimeSpan.FromMilliseconds(10) }, handler);
@@ -69,7 +102,7 @@ public class StructuredSocketTests
         await sender.ConnectAsync(listener.LocalEndPoint!, deadline.Token);
         using var receiver = await listener.AcceptAsync(deadline.Token);
         var blocks = new MemoryBlocks();
-        using var framing = new RespFraming(blocks, 4096);
+        var framing = new RespFraming(blocks, 4096);
         var handler = new Handler();
         var socket = new StructuredSocket<RespContext, Payload>(new Connection(sender), framing,
             new StructuredSocketOptions { OutgoingBufferSize = 4096 }, handler);
@@ -104,6 +137,7 @@ public class StructuredSocketTests
 
     private sealed class Payload : IPayload
     {
+        public int Cancellations { get; private set; }
         public TaskCompletionSource Writing { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Checked { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public bool OnAboutToWrite(int socketId, int ticks)
@@ -116,7 +150,7 @@ public class StructuredSocketTests
             Checked.TrySetResult();
             return false;
         }
-        public void LinkedCancel(int ticks) { }
+        public void LinkedCancel(int ticks) => Cancellations++;
     }
 
     private sealed class Handler : IStructuredSocketHandler<RespContext>
