@@ -88,17 +88,12 @@ public class RespFrameAggregationStrategy(RespAggregatesPool slicesPool)
                 if (remaining == 0 ||
                     remaining < Constants.StreamedLength
                     && variant.Simple?.Context.Type == RespType.End)
-                    if (--_stackPosition == -1)
-                    {
-                        respValueVariant = new RespValueVariant(element.Aggregate);
-                        element = default;
-                        return true;
-                    }
-                    else
-                    {
-                        variant = new RespValueVariant(element.Aggregate);
-                        continue;
-                    }
+                {
+                    variant = new RespValueVariant(element.Aggregate);
+                    element = default;
+                    _stackPosition--;
+                    continue;
+                }
 
                 respValueVariant = default;
                 return false;
@@ -111,7 +106,13 @@ public class RespFrameAggregationStrategy(RespAggregatesPool slicesPool)
 
     public void Reset()
     {
+        for (var i = 0; i <= _stackPosition; i++)
+        {
+            _stack[i].Aggregate.Dispose();
+            _stack[i] = default;
+        }
         _stackPosition = -1;
+        _streamedString?.Dispose();
         _streamedString = null;
     }
 
