@@ -142,10 +142,10 @@ public class Tests(IDatabaseAsync db, IRespClient client)
                                        await client.Set(v.Key, v.Value);
                                        using var val = await client.Get(v.Key);
 
-                                       i2 += JsonSerializer.Deserialize(val.GetSpan(), SampleJsonSerializerContext.Default.SampleJson)!.VectorValue.Length;
+                                       return JsonSerializer.Deserialize(val.GetSpan(), SampleJsonSerializerContext.Default.SampleJson)!.VectorValue.Length;
                                    })))
             {
-                CheckResult(res);
+                i2 += await res;
                 i++;
             }
 
@@ -162,10 +162,10 @@ public class Tests(IDatabaseAsync db, IRespClient client)
                                {
                                    await db.StringSetAsync(v.Key, v.Value);
                                    var stringGetAsync = (ReadOnlyMemory<byte>) await db.StringGetAsync(v.Key);
-                                   j2 += JsonSerializer.Deserialize(stringGetAsync.Span, SampleJsonSerializerContext.Default.SampleJson)!.VectorValue.Length;
+                                   return JsonSerializer.Deserialize(stringGetAsync.Span, SampleJsonSerializerContext.Default.SampleJson)!.VectorValue.Length;
                                })))
         {
-            CheckResult(res);
+            j2 += await res;
             j++;
         }
 
@@ -191,10 +191,10 @@ public class Tests(IDatabaseAsync db, IRespClient client)
                                        var deserialized = JsonSerializer.Deserialize(val.GetSpan(), SampleJsonSerializerContext.Default.SampleJson)!;
                                        if (deserialized.StringValue != v.StringValue)
                                            throw new InvalidOperationException();
-                                       i2 += deserialized.VectorValue.Length;
+                                       return deserialized.VectorValue.Length;
                                    })))
             {
-                CheckResult(res);
+                i2 += await res;
                 i++;
             }
 
@@ -214,10 +214,10 @@ public class Tests(IDatabaseAsync db, IRespClient client)
 
                                    if (deserialized.StringValue != v.StringValue)
                                        throw new InvalidOperationException();
-                                   j2 += deserialized.VectorValue.Length;
+                                   return deserialized.VectorValue.Length;
                                })))
         {
-            CheckResult(res);
+            j2 += await res;
             j++;
         }
 
@@ -281,10 +281,10 @@ public class Tests(IDatabaseAsync db, IRespClient client)
                                        await client.Set(key, new Value(v.Value!));
                                        using var val = await client.Get(key);
                                        RedisValue seValue = val.GetSpan().ToArray();
-                                       l += (int)seValue.Length();
+                                       return (int)seValue.Length();
                                    })))
             {
-                CheckResult(res);
+                l += await res;
                 i++;
             }
 
