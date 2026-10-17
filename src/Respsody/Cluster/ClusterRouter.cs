@@ -94,11 +94,11 @@ public sealed class ClusterRouter : IDisposable
         if (Interlocked.CompareExchange(ref _isSyncing, 1, 0) != 0)
             return (false, []);
 
+        using Defer _ = new(() => _isSyncing = 0);
+
         var state = _state;
         if (state is null)
             throw new RespClusterNotInitializedException();
-
-        using Defer _ = new(() => _isSyncing = 0);
 
         var endpoints = state.Nodes.Select(n => n.Metadata.Address?.FormatEndpoint())
             .Concat(_options.SeedEndpoints).Where(e => !string.IsNullOrWhiteSpace(e));

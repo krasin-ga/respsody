@@ -1,11 +1,24 @@
 using System;
 using System.Threading.Tasks;
+using Respsody.Exceptions;
 using Xunit;
 
 namespace Respsody.Tests;
 
 public class ClusterLifecycleTests
 {
+    [Fact]
+    public async Task PrematureRefreshDoesNotPreventInitialization()
+    {
+        await using var server = new ClusterTestServer();
+        using var router = ClusterRefreshTests.CreateRouter(server);
+
+        await Assert.ThrowsAsync<RespClusterNotInitializedException>(() => router.SyncClusterState());
+        await router.Initialize().WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.NotNull(router.PickRandomPrimary());
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
