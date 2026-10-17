@@ -28,6 +28,7 @@ public sealed class RespClient(
     private readonly ConcurrentQueue<Payload> _responseQueue = new();
     private readonly bool _runContinuationsAsynchronously = options.RunContinuationsAsynchronously;
     private readonly ConcurrentQueue<SubUnSub> _subUnSubConfirmationsQueue = new();
+    private SubscriptionState? _subscriptions;
     private RespAggregate? _attribute;
     private GCHandle? _handlersHandle;
     private StructuredSocket<RespContext, Payload>? _structuredSocket;
@@ -296,13 +297,21 @@ public sealed class RespClient(
             {
                 foreach (var confirmation in _subUnSubConfirmationsQueue)
                 {
-                    if (confirmation.Handle(data.Command, data.Ack) is var res &&
+                    if (confirmation.Handle(data, _subscriptions) is var res &&
                         res != SubUnSub.HandleResult.Unhandled)
                     {
                         if (res == SubUnSub.HandleResult.Completed)
                             DequeueCompletedSubscriptions();
                         break;
                     }
+                }
+
+                if (!data.IsNull)
+                {
+                    if (SubscriptionState.IsSubscribe(data.Command))
+                        (_subscriptions ??= new SubscriptionState()).Add(data.Command, data.Ack);
+                    else
+                        _subscriptions?.Remove(data.Command, data.Ack);
                 }
 
                 aggregate.Dispose();
@@ -396,6 +405,7 @@ public sealed class RespClient(
         }
 
         _respFrameAggregationStrategy.Reset();
+        _subscriptions = null;
         _attribute?.Dispose();
         _attribute = null;
 
@@ -850,31 +860,50 @@ public sealed class RespClient(
         }
 
         private readonly Dictionary<Bytes, int> _remainingAcks = CountAcknowledgements(acks);
+        private readonly bool _acknowledgeAll = acks.Length == 0 && SubscriptionState.IsUnsubscribe(command);
+        private Bytes[]? _resolvedAcks;
+        private bool _completed;
         public string Command => command;
         public Bytes[] Acks => acks;
         public int ConnectionGeneration => connectionGeneration;
 
-        public bool IsDone => _remainingAcks.Count == 0;
+        public bool IsDone => _completed;
 
-        public HandleResult Handle(string commandName, Bytes data)
+        public HandleResult Handle(SubscriptionHandle acknowledgement, SubscriptionState? subscriptions)
         {
-            if (_remainingAcks.Count == 0 || !string.Equals(Command, commandName, StringComparison.OrdinalIgnoreCase))
+            if (_completed || !string.Equals(Command, acknowledgement.Command, StringComparison.OrdinalIgnoreCase))
                 return HandleResult.Unhandled;
 
-            if (!_remainingAcks.TryGetValue(data, out var remaining))
-                return HandleResult.Unhandled;
+            if (_acknowledgeAll && _resolvedAcks is null)
+            {
+                _resolvedAcks = subscriptions?.Get(Command)?.ToArray() ?? [];
+                foreach (var expected in _resolvedAcks)
+                    _remainingAcks.Add(expected, 1);
+            }
 
-            if (remaining == 1)
-                _remainingAcks.Remove(data);
+            if (acknowledgement.IsNull)
+            {
+                if (!_acknowledgeAll || _remainingAcks.Count != 0)
+                    return HandleResult.Unhandled;
+            }
             else
-                _remainingAcks[data] = remaining - 1;
+            {
+                if (!_remainingAcks.TryGetValue(acknowledgement.Ack, out var remaining))
+                    return HandleResult.Unhandled;
 
-            var result = _remainingAcks.Count == 0
+                if (remaining == 1)
+                    _remainingAcks.Remove(acknowledgement.Ack);
+                else
+                    _remainingAcks[acknowledgement.Ack] = remaining - 1;
+            }
+
+            _completed = _remainingAcks.Count == 0;
+            var result = _completed
                 ? HandleResult.Completed
                 : HandleResult.Handled;
 
             if (result == HandleResult.Completed && ct.TryComplete())
-                taskCompletionSource.SetResult(new RespSubscriptionAck(Acks));
+                taskCompletionSource.SetResult(new RespSubscriptionAck(_resolvedAcks ?? Acks));
 
             return result;
         }
@@ -892,5 +921,46 @@ public sealed class RespClient(
                 CollectionsMarshal.GetValueRefOrAddDefault(counts, acknowledgement, out _)++;
             return counts;
         }
+    }
+
+    private sealed class SubscriptionState
+    {
+        private HashSet<Bytes>? _channels;
+        private HashSet<Bytes>? _patterns;
+        private HashSet<Bytes>? _shards;
+
+        public static bool IsSubscribe(string command)
+            => string.Equals(command, "SUBSCRIBE", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(command, "PSUBSCRIBE", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(command, "SSUBSCRIBE", StringComparison.OrdinalIgnoreCase);
+
+        public static bool IsUnsubscribe(string command)
+            => string.Equals(command, "UNSUBSCRIBE", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(command, "PUNSUBSCRIBE", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(command, "SUNSUBSCRIBE", StringComparison.OrdinalIgnoreCase);
+
+        public HashSet<Bytes>? Get(string command)
+        {
+            if (string.Equals(command, "UNSUBSCRIBE", StringComparison.OrdinalIgnoreCase))
+                return _channels;
+            if (string.Equals(command, "PUNSUBSCRIBE", StringComparison.OrdinalIgnoreCase))
+                return _patterns;
+            if (string.Equals(command, "SUNSUBSCRIBE", StringComparison.OrdinalIgnoreCase))
+                return _shards;
+            return null;
+        }
+
+        public void Add(string command, Bytes acknowledgement)
+        {
+            if (string.Equals(command, "SUBSCRIBE", StringComparison.OrdinalIgnoreCase))
+                (_channels ??= []).Add(acknowledgement);
+            else if (string.Equals(command, "PSUBSCRIBE", StringComparison.OrdinalIgnoreCase))
+                (_patterns ??= []).Add(acknowledgement);
+            else if (string.Equals(command, "SSUBSCRIBE", StringComparison.OrdinalIgnoreCase))
+                (_shards ??= []).Add(acknowledgement);
+        }
+
+        public void Remove(string command, Bytes acknowledgement)
+            => Get(command)?.Remove(acknowledgement);
     }
 }

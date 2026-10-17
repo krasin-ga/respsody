@@ -24,6 +24,182 @@ namespace Respsody.Tests;
 
 public class SubscriptionLifecycleTests
 {
+    [Theory]
+    [InlineData("SUBSCRIBE", "UNSUBSCRIBE")]
+    [InlineData("PSUBSCRIBE", "PUNSUBSCRIBE")]
+    [InlineData("SSUBSCRIBE", "SUNSUBSCRIBE")]
+    public async Task ArgumentFreeUnsubscribeIsSerializedAndCompletesOnTheSocket(string subscribe, string unsubscribe)
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var pair = await ConnectionPair.Create(deadline.Token);
+        var subscribed = SubscriptionCommand(pair.Client, subscribe, ["alpha"], default);
+        var unsubscribed = SubscriptionCommand(pair.Client, unsubscribe, [], default);
+        var ping = Ping(pair.Client);
+
+        Assert.Equal(new[] { subscribe, "alpha" }, await pair.ReadCommand(deadline.Token));
+        Assert.Equal(new[] { unsubscribe }, await pair.ReadCommand(deadline.Token));
+        Assert.Equal(new[] { "PING" }, await pair.ReadCommand(deadline.Token));
+        await pair.Write(Ack("alpha", subscribe) + Ack("alpha", unsubscribe, 0) + "+PONG\r\n", deadline.Token);
+
+        using var subscribedAck = await subscribed.AsTask().WaitAsync(deadline.Token);
+        using var unsubscribedAck = await unsubscribed.AsTask().WaitAsync(deadline.Token);
+        Assert.Equal("alpha", Assert.Single(unsubscribedAck.Acks).ToString(Encoding.UTF8));
+        using var pong = await ping.AsTask().WaitAsync(deadline.Token);
+        Assert.Equal("PONG", pong.ToString());
+    }
+
+    [Theory]
+    [InlineData("SUBSCRIBE", "UNSUBSCRIBE")]
+    [InlineData("PSUBSCRIBE", "PUNSUBSCRIBE")]
+    [InlineData("SSUBSCRIBE", "SUNSUBSCRIBE")]
+    public async Task ArgumentFreeUnsubscribeResolvesChannelsAfterPipelinedSubscribe(string subscribe, string unsubscribe)
+    {
+        using var client = new RespClient(new RespClientOptions(), new DefaultConnectionProcedure(new ConnectionOptions()));
+        using var framing = new RespFraming(new MemoryBlocks(), 128);
+        var subscribed = QueueSubscription(client, subscribe, ["alpha", "beta"]);
+        var unsubscribed = QueueSubscription(client, unsubscribe, []);
+        var pingSource = PooledValueTaskCompletionSource<RespString>.Create(true);
+        var ping = pingSource.AsValueTask();
+        var pingPayload = new RespClient.Payload(client, pingSource, ResponseType.String, "PING", Environment.TickCount);
+        Assert.True(pingPayload.OnAboutToWrite(1, Environment.TickCount));
+
+        Feed(client, framing, Ack("alpha", subscribe) + Ack("beta", subscribe));
+        using var subscribedAck = await subscribed;
+        Assert.False(unsubscribed.IsCompleted);
+        Feed(client, framing, Ack("alpha", unsubscribe));
+        Assert.False(unsubscribed.IsCompleted);
+        Feed(client, framing, Ack("beta", unsubscribe) + "+PONG\r\n");
+
+        Assert.True(unsubscribed.IsCompletedSuccessfully);
+        Assert.True(ping.IsCompletedSuccessfully);
+        using var unsubscribedAck = await unsubscribed;
+        Assert.Equal(new[] { "alpha", "beta" }, unsubscribedAck.Acks.Select(ack => ack.ToString(Encoding.UTF8)).Order());
+        using var pong = await ping;
+        Assert.Equal("PONG", pong.ToString());
+    }
+
+    [Theory]
+    [InlineData("UNSUBSCRIBE", false)]
+    [InlineData("PUNSUBSCRIBE", false)]
+    [InlineData("SUNSUBSCRIBE", false)]
+    [InlineData("UNSUBSCRIBE", true)]
+    [InlineData("PUNSUBSCRIBE", true)]
+    [InlineData("SUNSUBSCRIBE", true)]
+    public async Task EmptyArgumentFreeUnsubscribeWaitsForItsOwnNullAcknowledgement(string unsubscribe, bool bulkNull)
+    {
+        using var client = new RespClient(new RespClientOptions(), new DefaultConnectionProcedure(new ConnectionOptions()));
+        using var framing = new RespFraming(new MemoryBlocks(), 128);
+        var first = QueueSubscription(client, unsubscribe, []);
+        var second = QueueSubscription(client, unsubscribe, []);
+        var reply = Ack(null, unsubscribe, 0);
+        if (bulkNull)
+            reply = reply.Replace("_\r\n", "$-1\r\n");
+        Feed(client, framing, reply);
+        Assert.True(first.IsCompletedSuccessfully);
+        Assert.False(second.IsCompleted);
+        using var firstAck = await first;
+        Assert.Empty(firstAck.Acks);
+        Feed(client, framing, reply);
+        Assert.True(second.IsCompletedSuccessfully);
+        using var secondAck = await second;
+        Assert.Empty(secondAck.Acks);
+    }
+
+    [Theory]
+    [InlineData("SUBSCRIBE", "UNSUBSCRIBE")]
+    [InlineData("PSUBSCRIBE", "PUNSUBSCRIBE")]
+    [InlineData("SSUBSCRIBE", "SUNSUBSCRIBE")]
+    public async Task ExplicitUnsubscribeUpdatesTheLaterArgumentFreeSnapshot(string subscribe, string unsubscribe)
+    {
+        using var client = new RespClient(new RespClientOptions(), new DefaultConnectionProcedure(new ConnectionOptions()));
+        using var framing = new RespFraming(new MemoryBlocks(), 128);
+        var subscribed = QueueSubscription(client, subscribe, ["alpha", "beta"]);
+        var explicitRemoval = QueueSubscription(client, unsubscribe, ["alpha"]);
+        var remaining = QueueSubscription(client, unsubscribe, []);
+        Feed(client, framing, Ack("alpha", subscribe) + Ack("beta", subscribe) + Ack("alpha", unsubscribe));
+        using var subscribedAck = await subscribed;
+        using var explicitAck = await explicitRemoval;
+        Assert.False(remaining.IsCompleted);
+        Feed(client, framing, Ack("beta", unsubscribe, 0));
+        Assert.True(remaining.IsCompletedSuccessfully);
+        using var remainingAck = await remaining;
+        Assert.Equal("beta", Assert.Single(remainingAck.Acks).ToString(Encoding.UTF8));
+    }
+
+    [Fact]
+    public async Task ArgumentFreeUnsubscribeKeepsChannelPatternAndShardMembershipSeparate()
+    {
+        using var client = new RespClient(new RespClientOptions(), new DefaultConnectionProcedure(new ConnectionOptions()));
+        using var framing = new RespFraming(new MemoryBlocks(), 128);
+        var channels = QueueSubscription(client, "SUBSCRIBE", ["channel", "shared"]);
+        var patterns = QueueSubscription(client, "PSUBSCRIBE", ["pattern*", "shared"]);
+        var shards = QueueSubscription(client, "SSUBSCRIBE", ["shard", "shared"]);
+        var removeChannels = QueueSubscription(client, "UNSUBSCRIBE", []);
+        var removePatterns = QueueSubscription(client, "PUNSUBSCRIBE", []);
+        var removeShards = QueueSubscription(client, "SUNSUBSCRIBE", []);
+        Feed(client, framing, Ack("channel") + Ack("shared")
+            + Ack("pattern*", "psubscribe") + Ack("shared", "psubscribe")
+            + Ack("shard", "ssubscribe") + Ack("shared", "ssubscribe"));
+        using var channelAck = await channels;
+        using var patternAck = await patterns;
+        using var shardAck = await shards;
+
+        Feed(client, framing, Ack("channel", "unsubscribe", 3) + Ack("shared", "unsubscribe", 2));
+        Assert.True(removeChannels.IsCompletedSuccessfully);
+        Assert.False(removePatterns.IsCompleted);
+        Assert.False(removeShards.IsCompleted);
+        using var removedChannels = await removeChannels;
+        Assert.Equal(new[] { "channel", "shared" }, removedChannels.Acks.Select(ack => ack.ToString(Encoding.UTF8)).Order());
+
+        Feed(client, framing, Ack("pattern*", "punsubscribe", 1) + Ack("shared", "punsubscribe", 0));
+        Assert.True(removePatterns.IsCompletedSuccessfully);
+        Assert.False(removeShards.IsCompleted);
+        using var removedPatterns = await removePatterns;
+        Assert.Equal(new[] { "pattern*", "shared" }, removedPatterns.Acks.Select(ack => ack.ToString(Encoding.UTF8)).Order());
+
+        Feed(client, framing, Ack("shard", "sunsubscribe", 1) + Ack("shared", "sunsubscribe", 0));
+        Assert.True(removeShards.IsCompletedSuccessfully);
+        using var removedShards = await removeShards;
+        Assert.Equal(new[] { "shard", "shared" }, removedShards.Acks.Select(ack => ack.ToString(Encoding.UTF8)).Order());
+    }
+
+    [Fact]
+    public async Task EmptyChannelIsDifferentFromAnEmptySubscriptionSet()
+    {
+        using var client = new RespClient(new RespClientOptions(), new DefaultConnectionProcedure(new ConnectionOptions()));
+        using var framing = new RespFraming(new MemoryBlocks(), 128);
+        var subscribed = QueueSubscription(client, "SUBSCRIBE", [""]);
+        var unsubscribed = QueueSubscription(client, "UNSUBSCRIBE", []);
+        var empty = QueueSubscription(client, "UNSUBSCRIBE", []);
+        Feed(client, framing, Ack("") + Ack("", "unsubscribe", 0));
+        using var subscribedAck = await subscribed;
+        Assert.True(unsubscribed.IsCompletedSuccessfully);
+        Assert.False(empty.IsCompleted);
+        using var removed = await unsubscribed;
+        Assert.Equal("", Assert.Single(removed.Acks).ToString(Encoding.UTF8));
+        Feed(client, framing, Ack(null, "unsubscribe", 0));
+        Assert.True(empty.IsCompletedSuccessfully);
+        using var emptyAck = await empty;
+        Assert.Empty(emptyAck.Acks);
+    }
+
+    [Fact]
+    public async Task DisconnectClearsTheMembershipUsedByArgumentFreeUnsubscribe()
+    {
+        using var client = new RespClient(new RespClientOptions(), new DefaultConnectionProcedure(new ConnectionOptions()));
+        using var framing = new RespFraming(new MemoryBlocks(), 128);
+        var subscribed = QueueSubscription(client, "SUBSCRIBE", ["alpha"]);
+        Feed(client, framing, Ack("alpha"));
+        using var subscribedAck = await subscribed;
+        client.OnDisconnected(null, 1);
+
+        var unsubscribed = QueueSubscription(client, "UNSUBSCRIBE", [], generation: 2);
+        Feed(client, framing, Ack(null, "unsubscribe", 0));
+        Assert.True(unsubscribed.IsCompletedSuccessfully);
+        using var acknowledgement = await unsubscribed;
+        Assert.Empty(acknowledgement.Acks);
+    }
+
     [Fact]
     public async Task DuplicateChannelsRequireOneAcknowledgementPerArgument()
     {
@@ -189,6 +365,17 @@ public class SubscriptionLifecycleTests
         => new(client, source, ResponseType.Subscription, "SUBSCRIBE", Environment.TickCount,
             subAcks: channels.Select(channel => new Bytes(Encoding.UTF8.GetBytes(channel))).ToArray());
 
+    private static ValueTask<RespSubscriptionAck> QueueSubscription(RespClient client, string command, string[] channels,
+        int generation = 1)
+    {
+        var source = PooledValueTaskCompletionSource<RespSubscriptionAck>.Create(true);
+        var future = source.AsValueTask();
+        var payload = new RespClient.Payload(client, source, ResponseType.Subscription, command, Environment.TickCount,
+            subAcks: channels.Select(channel => new Bytes(Encoding.UTF8.GetBytes(channel))).ToArray());
+        Assert.True(payload.OnAboutToWrite(generation, Environment.TickCount));
+        return future;
+    }
+
     private static void Feed(RespClient client, RespFraming framing, string text)
     {
         var bytes = Encoding.UTF8.GetBytes(text).AsSpan();
@@ -205,8 +392,12 @@ public class SubscriptionLifecycleTests
 
     private static ValueTask<RespSubscriptionAck> Subscribe(RespClient client, string[] channels,
         CancellationToken token, int timeout = int.MaxValue)
+        => SubscriptionCommand(client, "SUBSCRIBE", channels, token, timeout);
+
+    private static ValueTask<RespSubscriptionAck> SubscriptionCommand(RespClient client, string name, string[] channels,
+        CancellationToken token, int timeout = int.MaxValue)
     {
-        using var command = client.CreateCommand<RespSubscriptionAck>("SUBSCRIBE").WithTimeout(timeout);
+        using var command = client.CreateCommand<RespSubscriptionAck>(name).WithTimeout(timeout);
         foreach (var channel in channels)
             command.Token(channel);
         return client.ExecuteCommand(command, token);
@@ -218,8 +409,12 @@ public class SubscriptionLifecycleTests
         return client.ExecuteCommand(command);
     }
 
-    private static string Ack(string channel)
-        => $">3\r\n$9\r\nsubscribe\r\n${channel.Length}\r\n{channel}\r\n:1\r\n";
+    private static string Ack(string? channel, string command = "subscribe", int count = 1)
+    {
+        command = command.ToLowerInvariant();
+        var channelFrame = channel is null ? "_\r\n" : $"${channel.Length}\r\n{channel}\r\n";
+        return $">3\r\n${command.Length}\r\n{command}\r\n{channelFrame}:{count}\r\n";
+    }
 
     private sealed class ProbeReceiver : IRespPushReceiver
     {

@@ -42,8 +42,10 @@ internal static class CommandParser
             using var agg = value.Aggregate!;
             var array = value.Aggregate!.ToRespArray(disposalGuard);
 
-            if (array.Length <= 1)
-                throw new InvalidOperationException("Command must have arguments");
+            if (array.Length == 0)
+                throw new InvalidOperationException("Command must contain its name");
+            if (array.Length == 1)
+                return [];
 
             static Bytes Decode(in OwnedRespValueVariant valueVariant)
             {
