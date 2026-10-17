@@ -25,13 +25,19 @@ public class BuffersBenchmark
     [Benchmark]
     public int StaticWithInterlocked()
     {
-        Interlocked.CompareExchange(ref _flag, 1, 0);
+        var spinner = new SpinWait();
+        while (Interlocked.CompareExchange(ref _flag, 1, 0) != 0)
+            spinner.SpinOnce();
 
-        _testDataToCopy.AsSpan().CopyTo(Buffer2);
-
-        Interlocked.Exchange(ref _flag, 0);
-
-        return _testDataToCopy.Length;
+        try
+        {
+            _testDataToCopy.AsSpan().CopyTo(Buffer2);
+            return _testDataToCopy.Length;
+        }
+        finally
+        {
+            Volatile.Write(ref _flag, 0);
+        }
     }
 
     [Benchmark]
