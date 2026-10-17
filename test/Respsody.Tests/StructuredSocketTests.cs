@@ -15,6 +15,47 @@ namespace Respsody.Tests;
 public class StructuredSocketTests
 {
     [Fact]
+    public async Task LiveBatchSurvivesDisconnectedExpiration()
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var listener = new Socket(SocketType.Stream, ProtocolType.Tcp);
+        listener.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        listener.Listen(1);
+        using var sender = new Socket(SocketType.Stream, ProtocolType.Tcp);
+        await sender.ConnectAsync(listener.LocalEndPoint!, deadline.Token);
+        using var receiver = await listener.AcceptAsync(deadline.Token);
+        var connect = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var blocks = new MemoryBlocks();
+        using var framing = new RespFraming(blocks, 4096);
+        var handler = new Handler();
+        using var socket = new StructuredSocket<RespContext, Payload>(new Connection(sender, connect.Task), framing,
+            new StructuredSocketOptions { HeartbeatInterval = TimeSpan.FromMilliseconds(10) }, handler);
+        var first = new Payload();
+        socket.Send(new[]
+        {
+            new TransmitUnit<Payload>(Page(blocks, (byte)'A'), first),
+            new TransmitUnit<Payload>(Page(blocks, (byte)'B'), new Payload())
+        });
+        socket.Start();
+        await first.Checked.Task.WaitAsync(deadline.Token);
+        connect.SetResult();
+
+        var result = new byte[2];
+        for (var offset = 0; offset < result.Length;)
+            offset += await receiver.ReceiveAsync(result.AsMemory(offset), SocketFlags.None, deadline.Token);
+        Assert.Equal("AB"u8.ToArray(), result);
+    }
+
+    private static OutgoingBuffer Page(MemoryBlocks blocks, byte value)
+    {
+        var page = blocks.LeaseLinked(4096, false, 0);
+        page.Write(new[] { value });
+        page.Commit();
+        page.FreeByOwner();
+        return page;
+    }
+
+    [Fact]
     public async Task DisposalInterruptsScatterSendToPeerThatDoesNotRead()
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -45,24 +86,33 @@ public class StructuredSocketTests
         await handler.Disconnected.Task.WaitAsync(deadline.Token);
     }
 
-    private sealed class Connection(Socket socket) : IConnectionProcedure
+    private sealed class Connection(Socket socket, Task? gate = null) : IConnectionProcedure
     {
         public IReadOnlyDictionary<string, string?> Config => new Dictionary<string, string?>();
         public TimeSpan Timeout => TimeSpan.FromSeconds(10);
-        public Task<ConnectedSocket> Connect(CancellationToken token)
-            => Task.FromResult(new ConnectedSocket(socket,
-                new ConnectionMetadata(socket.RemoteEndPoint!, new Dictionary<string, object?>())));
+        public async Task<ConnectedSocket> Connect(CancellationToken token)
+        {
+            if (gate is not null)
+                await gate.WaitAsync(token);
+            return new ConnectedSocket(socket,
+                new ConnectionMetadata(socket.RemoteEndPoint!, new Dictionary<string, object?>()));
+        }
     }
 
     private sealed class Payload : IPayload
     {
         public TaskCompletionSource Writing { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Checked { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public bool OnAboutToWrite(int socketId, int ticks)
         {
             Writing.TrySetResult();
             return true;
         }
-        public bool TryExpire(int ticks) => false;
+        public bool TryExpire(int ticks)
+        {
+            Checked.TrySetResult();
+            return false;
+        }
         public void LinkedCancel(int ticks) { }
     }
 

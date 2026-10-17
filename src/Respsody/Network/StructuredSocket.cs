@@ -307,7 +307,10 @@ public sealed class StructuredSocket<TIncoming, TPayload> : IDisposable
                     continue;
 
                 if (multiple[0].Payload?.TryExpire(tickCount) is not true)
+                {
+                    alive.Add(data);
                     continue;
+                }
 
                 multiple[0].Page.FreeByDeliveryPipeline();
 
