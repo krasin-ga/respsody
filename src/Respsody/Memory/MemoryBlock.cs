@@ -17,7 +17,7 @@ public sealed class MemoryBlock : IDisposable
     private readonly int _bufferSize;
 
     private int _leases;
-    private MemoryBlocks _memoryBlocks = null!;
+    private MemoryBlocks? _memoryBlocks;
     private int _offset;
     private int _position;
 
@@ -47,15 +47,18 @@ public sealed class MemoryBlock : IDisposable
 
     ~MemoryBlock()
     {
+        if (_memoryBlocks is not { } memoryBlocks)
+            return;
+
         if (_leases == 1)
         {
             DecLeases();
             GC.ReRegisterForFinalize(this);
-            _memoryBlocks.OnBlockResurrected(_bufferSize);
+            memoryBlocks.OnBlockResurrected(_bufferSize);
             return;
         }
 
-        _memoryBlocks.OnBlockDestroyed(_bufferSize);
+        memoryBlocks.OnBlockDestroyed(_bufferSize);
     }
 
     internal void HookUpBlocks(MemoryBlocks memoryBlocks)
@@ -73,7 +76,7 @@ public sealed class MemoryBlock : IDisposable
         if (decrement == 0)
         {
             Reset();
-            _memoryBlocks.Return(this);
+            _memoryBlocks?.Return(this);
         }
     }
 
