@@ -14,6 +14,29 @@ namespace Respsody.Tests;
 
 public class StructuredSocketTests
 {
+    [Fact]
+    public async Task DisposalWakesAnIdleSendLoop()
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var listener = new Socket(SocketType.Stream, ProtocolType.Tcp);
+        listener.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        listener.Listen(1);
+        using var sender = new Socket(SocketType.Stream, ProtocolType.Tcp);
+        await sender.ConnectAsync(listener.LocalEndPoint!, deadline.Token);
+        using var receiver = await listener.AcceptAsync(deadline.Token);
+        var handler = new Handler();
+        var framing = new RespFraming(new MemoryBlocks(), 4096);
+        using var socket = new StructuredSocket<RespContext, Payload>(new Connection(sender), framing,
+            new StructuredSocketOptions(), handler);
+        socket.Start();
+        await handler.Connected.Task.WaitAsync(deadline.Token);
+
+        socket.Dispose();
+
+        await socket.Completion.WaitAsync(deadline.Token);
+        await handler.Disconnected.Task.WaitAsync(deadline.Token);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

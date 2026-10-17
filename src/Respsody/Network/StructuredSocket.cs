@@ -151,10 +151,13 @@ public sealed class StructuredSocket<TIncoming, TPayload> : IDisposable
     private async Task SendingLoop(Socket socket, int connectionGen, CancellationToken token)
     {
         var outgoingChannel = _outgoingChannel.Reader;
+        using var wakeOnCancellation = token.UnsafeRegister(
+            static state => ((ChannelWriter<Outgoing>)state!).TryWrite(default), _channelWriter);
         var outgoingBuffer = new byte[_options.OutgoingBufferSize];
         var written = 0;
 
-        while (_pendingOutgoing.Count > 0 || await outgoingChannel.WaitToReadAsync(token))
+        while (!token.IsCancellationRequested &&
+               (_pendingOutgoing.Count > 0 || await outgoingChannel.WaitToReadAsync()))
         {
             token.ThrowIfCancellationRequested();
             var ticks = Environment.TickCount;
