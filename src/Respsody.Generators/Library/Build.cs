@@ -101,7 +101,7 @@ internal static class Build
         List<ParameterSyntax> parameters)
     {
         var methodIdentifier = methodNamePreference ?? CultureInfo.InvariantCulture.TextInfo.ToTitleCase(
-            command.ToLower()
+            command.ToLowerInvariant()
         );
 
         var method = MethodDeclaration(
@@ -150,7 +150,7 @@ internal static class Build
         );
 
         var methodIdentifier = (methodNamePreference ?? CultureInfo.InvariantCulture.TextInfo.ToTitleCase(
-            command.ToLower()
+            command.ToLowerInvariant()
         )) + "Command";
 
         var method = MethodDeclaration(
@@ -449,13 +449,13 @@ internal static class Build
 
         public static ParameterSyntax ForOption(OptionSyntaxNode optionSyntaxNode)
         {
-            return Parameter(Identifier(optionSyntaxNode.Option.ToLower()))
+            return Parameter(Identifier(optionSyntaxNode.Option.ToLowerInvariant()))
                 .WithType(Type.For(optionSyntaxNode));
         }
 
         public static ParameterSyntax ForOptions(OptionSyntaxNode option)
         {
-            return Parameter(Identifier(option.Option.ToLower() + "Items")).WithType(
+            return Parameter(Identifier(option.Option.ToLowerInvariant() + "Items")).WithType(
                 ArrayType(Type.For(option), List([ArrayRankSpecifier()]))
             );
         }

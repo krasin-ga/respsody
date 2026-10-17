@@ -322,7 +322,7 @@ internal class CommandsSourceGenerator : IIncrementalGenerator
                 methodNamePreference: MethodNamePreference is { }
                     ? MethodNamePreference + "Void"
                     : CultureInfo.InvariantCulture.TextInfo.ToTitleCase(
-                        CommandSyntaxNode.Command.ToLower()
+                        CommandSyntaxNode.Command.ToLowerInvariant()
                     ) + "Void",
                 explicitPriority: ExplicitPriority,
                 isPublic: IsPublic,

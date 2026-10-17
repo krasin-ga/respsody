@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Immutable;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -14,6 +15,40 @@ namespace Respsody.Tests;
 
 public class GeneratorTests
 {
+    [Fact]
+    public void GeneratesTheSameApiAcrossCultures()
+    {
+        const string source = """
+            using Respsody;
+            using Respsody.Resp;
+            namespace Generated;
+            [RespCommand("INCR key [LIMIT] [ITEM ...]", ResponseType.Number)]
+            public static class Definitions;
+            """;
+        var originalCulture = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("en-US");
+            var english = Generate(source);
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("tr-TR");
+            var turkish = Generate(source);
+
+            AssertCompiles(english);
+            AssertCompiles(turkish);
+            Assert.Equal(english.Run.GeneratedTrees.Single().ToString(),
+                turkish.Run.GeneratedTrees.Single().ToString());
+            var command = turkish.Output.GetTypeByMetadataName("Generated.INCR")!;
+            Assert.NotEmpty(command.GetMembers("Incr"));
+            Assert.NotEmpty(command.GetMembers("IncrVoid"));
+            Assert.Contains(command.GetMembers().OfType<IMethodSymbol>()
+                .SelectMany(method => method.Parameters), parameter => parameter.Name == "limit");
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = originalCulture;
+        }
+    }
+
     [Theory]
     [InlineData("RespCommand")]
     [InlineData("RespCommandAttribute")]
