@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Text;
+using System.Runtime.ExceptionServices;
 using Respsody.Client;
 using Respsody.Cluster.Errors;
 using Respsody.Cluster.Options;
@@ -436,13 +437,30 @@ public sealed class ClusterRouter : IDisposable
                 if (!withAsking)
                     return await endpointClient.ExecuteCommand(command, cancellationToken);
 
-                var combo = new Combo(endpointClient, command.Timeout);
+                using var combo = new Combo(endpointClient, command.Timeout);
                 using var asking = endpointClient.CreateCommand<RespVoid>("ASKING").WithTimeout(command.Timeout);
-                endpointClient.Pack(combo, asking, cancellationToken);
+                var askingResponse = endpointClient.Pack(combo, asking, cancellationToken);
                 var commandResponse = endpointClient.Pack(combo, command, cancellationToken);
                 combo.Execute();
 
-                return await commandResponse.Future();
+                Exception? askingError = null;
+                try
+                {
+                    using var acknowledgement = await askingResponse.Future();
+                }
+                catch (Exception exception)
+                {
+                    askingError = exception;
+                }
+
+                var result = await commandResponse.Future();
+                if (askingError is not null)
+                {
+                    result.Dispose();
+                    ExceptionDispatchInfo.Throw(askingError);
+                }
+
+                return result;
             }
         }
 
