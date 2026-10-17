@@ -18,6 +18,7 @@ public sealed class StructuredSocket<TIncoming, TPayload> : IDisposable
     private readonly TaskCompletionSource _initialConnectionTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly StructuredSocketOptions _options;
     private readonly Channel<Outgoing> _outgoingChannel;
+    private readonly Queue<Outgoing> _pendingOutgoing = new();
     private int _isStarted;
     public bool IsDisposed { get; private set; }
     public Task Connected => _initialConnectionTcs.Task;
@@ -129,12 +130,12 @@ public sealed class StructuredSocket<TIncoming, TPayload> : IDisposable
         var outgoingBuffer = new byte[_options.OutgoingBufferSize];
         var written = 0;
         
-        while (await outgoingChannel.WaitToReadAsync(token))
+        while (_pendingOutgoing.Count > 0 || await outgoingChannel.WaitToReadAsync(token))
         {
             token.ThrowIfCancellationRequested();
 
             var ticks = Environment.TickCount;
-            while (outgoingChannel.TryRead(out var data))
+            while (_pendingOutgoing.TryDequeue(out var data) || outgoingChannel.TryRead(out data))
             {
                 var (single, multiple) = data;
 
@@ -284,48 +285,48 @@ public sealed class StructuredSocket<TIncoming, TPayload> : IDisposable
         using var periodicTimer = new PeriodicTimer(_options.HeartbeatInterval);
 
         var reader = _outgoingChannel.Reader;
-        var writer = _outgoingChannel.Writer;
-
-        var alive = new List<Outgoing>();
         while (await periodicTimer.WaitForNextTickAsync(token))
         {
             var tickCount = Environment.TickCount;
-            while (reader.TryRead(out var data))
+            var pendingCount = _pendingOutgoing.Count;
+            for (var i = 0; i < pendingCount; i++)
             {
-                if (data.Single is { } single)
-                {
-                    if (single.Payload?.TryExpire(tickCount) is true)
-                    {
-                        single.Page.FreeByDeliveryPipeline();
-                        continue;
-                    }
-
-                    alive.Add(data);
-                }
-
-                if (data.Batch is not { } multiple)
-                    continue;
-
-                if (multiple[0].Payload?.TryExpire(tickCount) is not true)
-                {
-                    alive.Add(data);
-                    continue;
-                }
-
-                multiple[0].Page.FreeByDeliveryPipeline();
-
-                for (var i = 1; i < multiple.Count; i++)
-                {
-                    multiple[i].Payload?.LinkedCancel(tickCount);
-                    multiple[i].Page.FreeByDeliveryPipeline();
-                }
+                var pending = _pendingOutgoing.Dequeue();
+                if (!TryExpire(pending, tickCount))
+                    _pendingOutgoing.Enqueue(pending);
             }
 
-            foreach (var data in alive)
-                writer.TryWrite(data);
-
-            alive.Clear();
+            while (reader.TryRead(out var data))
+            {
+                if (!TryExpire(data, tickCount))
+                    _pendingOutgoing.Enqueue(data);
+            }
         }
+    }
+
+    private static bool TryExpire(in Outgoing data, int ticks)
+    {
+        if (data.Single is { } single)
+        {
+            if (single.Payload?.TryExpire(ticks) is not true)
+                return false;
+            single.Page.FreeByDeliveryPipeline();
+            return true;
+        }
+
+        if (data.Batch is not { Count: > 0 } multiple)
+            return true;
+
+        if (multiple[0].Payload?.TryExpire(ticks) is not true)
+            return false;
+
+        multiple[0].Page.FreeByDeliveryPipeline();
+        for (var i = 1; i < multiple.Count; i++)
+        {
+            multiple[i].Payload?.LinkedCancel(ticks);
+            multiple[i].Page.FreeByDeliveryPipeline();
+        }
+        return true;
     }
 
     public void Dispose()

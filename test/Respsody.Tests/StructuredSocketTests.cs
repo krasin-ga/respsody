@@ -38,12 +38,15 @@ public class StructuredSocketTests
         });
         socket.Start();
         await first.Checked.Task.WaitAsync(deadline.Token);
+        var last = new Payload();
+        socket.Send(new TransmitUnit<Payload>(Page(blocks, (byte)'C'), last));
+        await last.Checked.Task.WaitAsync(deadline.Token);
         connect.SetResult();
 
-        var result = new byte[2];
+        var result = new byte[3];
         for (var offset = 0; offset < result.Length;)
             offset += await receiver.ReceiveAsync(result.AsMemory(offset), SocketFlags.None, deadline.Token);
-        Assert.Equal("AB"u8.ToArray(), result);
+        Assert.Equal("ABC"u8.ToArray(), result);
     }
 
     private static OutgoingBuffer Page(MemoryBlocks blocks, byte value)
