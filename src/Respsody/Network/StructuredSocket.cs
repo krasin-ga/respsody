@@ -146,93 +146,103 @@ public sealed class StructuredSocket<TIncoming, TPayload> : IDisposable
         var outgoingChannel = _outgoingChannel.Reader;
         var outgoingBuffer = new byte[_options.OutgoingBufferSize];
         var written = 0;
-        
+
         while (_pendingOutgoing.Count > 0 || await outgoingChannel.WaitToReadAsync(token))
         {
             token.ThrowIfCancellationRequested();
-
             var ticks = Environment.TickCount;
-            while (_pendingOutgoing.TryDequeue(out var data) || outgoingChannel.TryRead(out data))
+            while (!token.IsCancellationRequested &&
+                   (_pendingOutgoing.TryDequeue(out var data) || outgoingChannel.TryRead(out data)))
             {
                 var (single, multiple) = data;
-
                 if (single.HasValue)
                 {
                     var (buffer, payload) = single.Value;
-                    if (payload?.OnAboutToWrite(connectionGen, ticks) is false)
+                    try
                     {
-                        buffer.FreeByDeliveryPipeline();
-                        continue;
-                    }
-
-                    if (buffer.TryCopyTo(outgoingBuffer.AsSpan(written), out var bytesWritten))
-                    {
-                        buffer.FreeByDeliveryPipeline();
-                        written += bytesWritten;
-
-                        continue;
-                    }
-
-                    if (written > 0)
-                    {
-                        await SendInternal(socket, outgoingBuffer, written, token);
-                        ticks = Environment.TickCount;
-                        written = 0;
-                    }
-
-                    if (buffer.TryCopyTo(outgoingBuffer.AsSpan(written), out bytesWritten))
-                    {
-                        buffer.FreeByDeliveryPipeline();
-                        written += bytesWritten;
-                        continue;
-                    }
-
-                    await SendInternal(socket, buffer);
-                    ticks = Environment.TickCount;
-                    continue;
-                }
-
-                if (multiple is { })
-                {
-                    foreach (var transmitUnit in multiple)
-                    {
-                        var (buffer, payload) = transmitUnit;
                         if (payload?.OnAboutToWrite(connectionGen, ticks) is false)
-                        {
-                            buffer.FreeByDeliveryPipeline();
                             continue;
-                        }
 
                         if (buffer.TryCopyTo(outgoingBuffer.AsSpan(written), out var bytesWritten))
                         {
-                            buffer.FreeByDeliveryPipeline();
                             written += bytesWritten;
-
                             continue;
                         }
 
                         if (written > 0)
                         {
                             await SendInternal(socket, outgoingBuffer, written, token);
+                            ticks = Environment.TickCount;
                             written = 0;
                         }
 
-                        if (buffer.TryCopyTo(outgoingBuffer.AsSpan(written), out bytesWritten))
+                        if (buffer.TryCopyTo(outgoingBuffer, out bytesWritten))
                         {
-                            buffer.FreeByDeliveryPipeline();
-                            written += bytesWritten;
+                            written = bytesWritten;
                             continue;
                         }
 
                         await SendInternal(socket, buffer);
                         ticks = Environment.TickCount;
                     }
+                    finally
+                    {
+                        buffer.FreeByDeliveryPipeline();
+                    }
+                    continue;
+                }
+
+                if (multiple is not { })
+                    continue;
+
+                var index = 0;
+                try
+                {
+                    for (; index < multiple.Count; index++)
+                    {
+                        var (buffer, payload) = multiple[index];
+                        try
+                        {
+                            if (payload?.OnAboutToWrite(connectionGen, ticks) is false)
+                                continue;
+
+                            if (buffer.TryCopyTo(outgoingBuffer.AsSpan(written), out var bytesWritten))
+                            {
+                                written += bytesWritten;
+                                continue;
+                            }
+
+                            if (written > 0)
+                            {
+                                await SendInternal(socket, outgoingBuffer, written, token);
+                                ticks = Environment.TickCount;
+                                written = 0;
+                            }
+
+                            if (buffer.TryCopyTo(outgoingBuffer, out bytesWritten))
+                            {
+                                written = bytesWritten;
+                                continue;
+                            }
+
+                            await SendInternal(socket, buffer);
+                            ticks = Environment.TickCount;
+                        }
+                        finally
+                        {
+                            buffer.FreeByDeliveryPipeline();
+                        }
+                    }
+                }
+                finally
+                {
+                    for (index++; index < multiple.Count; index++)
+                        Release(multiple[index], Environment.TickCount);
                 }
             }
 
             if (written <= 0)
                 continue;
-
             await SendInternal(socket, outgoingBuffer, written, token);
             written = 0;
         }
@@ -254,14 +264,7 @@ public sealed class StructuredSocket<TIncoming, TPayload> : IDisposable
         Socket socket,
         OutgoingBuffer page)
     {
-        try
-        {
-            await SocketWriter.SendAllAsync(socket, page.AsSegmentList(), _options.SendingFlags);
-        }
-        finally
-        {
-            page.FreeByDeliveryPipeline();
-        }
+        await SocketWriter.SendAllAsync(socket, page.AsSegmentList(), _options.SendingFlags);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]

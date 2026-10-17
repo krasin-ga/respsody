@@ -91,8 +91,10 @@ public class StructuredSocketTests
         return page;
     }
 
-    [Fact]
-    public async Task DisposalInterruptsScatterSendToPeerThatDoesNotRead()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DisposalInterruptsScatterSendToPeerThatDoesNotRead(bool batch)
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         using var listener = new Socket(SocketType.Stream, ProtocolType.Tcp);
@@ -106,6 +108,7 @@ public class StructuredSocketTests
         var handler = new Handler();
         var socket = new StructuredSocket<RespContext, Payload>(new Connection(sender), framing,
             new StructuredSocketOptions { OutgoingBufferSize = 4096 }, handler);
+        var remaining = new Payload();
         using (socket)
         {
             socket.Start();
@@ -115,11 +118,20 @@ public class StructuredSocketTests
             page.Commit();
             page.FreeByOwner();
             var payload = new Payload();
-            socket.Send(new TransmitUnit<Payload>(page, payload));
+            if (batch)
+                socket.Send(new[]
+                {
+                    new TransmitUnit<Payload>(page, payload),
+                    new TransmitUnit<Payload>(Page(blocks, (byte)'B'), remaining)
+                });
+            else
+                socket.Send(new TransmitUnit<Payload>(page, payload));
             await payload.Writing.Task.WaitAsync(deadline.Token);
         }
 
         await handler.Disconnected.Task.WaitAsync(deadline.Token);
+        if (batch)
+            Assert.Equal(1, remaining.Cancellations);
     }
 
     private sealed class Connection(Socket socket, Task? gate = null) : IConnectionProcedure
