@@ -1,5 +1,6 @@
 ﻿using Respsody.Cluster.Errors;
 using System.Diagnostics.CodeAnalysis;
+using Respsody.Exceptions;
 
 namespace Respsody.Cluster;
 
@@ -8,12 +9,12 @@ public class SlotsMap
     private const int MaxSlots = 16384;
     private readonly Dictionary<string, ClusterNode> _endpointToNode;
     private readonly Dictionary<string, ClusterNode> _endpointToPrimaryNode;
-    private readonly ClusterNode[] _slotToNode;
+    private readonly ClusterNode?[] _slotToNode;
     public bool IsUnstable { get; }
 
     public SlotsMap(IEnumerable<ClusterNode> nodes)
     {
-        _slotToNode = new ClusterNode[MaxSlots];
+        _slotToNode = new ClusterNode?[MaxSlots];
         _endpointToPrimaryNode = [];
         _endpointToNode = [];
         foreach (var clusterNode in nodes)
@@ -46,7 +47,8 @@ public class SlotsMap
         }
     }
 
-    public ClusterNode GetNode(ushort slot) => _slotToNode[slot];
+    public ClusterNode GetNode(ushort slot) => _slotToNode[slot]
+        ?? throw new RespClusterCommandExecutionException($"No cluster node is assigned to hash slot {slot}.");
 
     public bool TryGetNodeByEndpoint(ReadOnlySpan<char> endpoint, [NotNullWhen(true)] out ClusterNode? clusterNode)
     {
