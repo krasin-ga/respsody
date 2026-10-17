@@ -1,4 +1,4 @@
-﻿using System.Net.Sockets;
+using System.Net.Sockets;
 using Respsody.Client.Connection.Options;
 using Respsody.Network;
 using Respsody.Resp;
@@ -30,33 +30,41 @@ public class DefaultConnectionProcedure(ConnectionOptions connectionOptions)
             NoDelay = true,
         };
 
-        var endPoint = connectionOptions.GetEndPoint();
-        await socket.ConnectAsync(endPoint, cts.Token);
-        using var socketRpc = new DirectSocketRpc(socket);
-        var authOptions = connectionOptions.AuthOptions;
-
-        using var helloReply = await socketRpc.Rpc(
-            "HELLO",
-            c =>
-            {
-                c.Arg(SupportedProtocolVersion);
-
-                if (authOptions is { } && !string.IsNullOrWhiteSpace(authOptions.Password))
+        try
+        {
+            var endPoint = connectionOptions.GetEndPoint();
+            await socket.ConnectAsync(endPoint, cts.Token);
+            using var socketRpc = new DirectSocketRpc(socket);
+            var authOptions = connectionOptions.AuthOptions;
+    
+            using var helloReply = await socketRpc.Rpc(
+                "HELLO",
+                c =>
                 {
-                    c.Token("AUTH");
-                    c.Arg(authOptions.UserName ?? "default");
-                    c.Arg(authOptions.Password);
-                }
-
-                if (connectionOptions.ClientName is { } clientName)
-                {
-                    c.Token("SETNAME");
-                    c.Arg(clientName);
-                }
-            },
-            cts.Token);
-
-        var metadata = helloReply.Variant.ToRespMap().ToMapWithStringKey();
-        return new ConnectedSocket(socket, new ConnectionMetadata(endPoint, metadata));
+                    c.Arg(SupportedProtocolVersion);
+    
+                    if (authOptions is { } && !string.IsNullOrWhiteSpace(authOptions.Password))
+                    {
+                        c.Token("AUTH");
+                        c.Arg(authOptions.UserName ?? "default");
+                        c.Arg(authOptions.Password);
+                    }
+    
+                    if (connectionOptions.ClientName is { } clientName)
+                    {
+                        c.Token("SETNAME");
+                        c.Arg(clientName);
+                    }
+                },
+                cts.Token);
+    
+            var metadata = helloReply.Variant.ToRespMap().ToMapWithStringKey();
+            return new ConnectedSocket(socket, new ConnectionMetadata(endPoint, metadata));
+        }
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
     }
 }
