@@ -60,7 +60,7 @@ var jsons_10K = srcJsons_10K.Select(
 ).ToArray();
 
 var clientFactory = new RespClientFactory();
-var client = await clientFactory.Create(
+using var client = await clientFactory.Create(
     new RespClientOptions()
     {
         //Handler = new RespClientHandler()
@@ -68,12 +68,13 @@ var client = await clientFactory.Create(
     new DefaultConnectionProcedure(new ConnectionOptions() { Endpoint = ipEndPoint.ToString() })
 );
 
-var db = (await ConnectionMultiplexer.ConnectAsync(new ConfigurationOptions()
+using var multiplexer = await ConnectionMultiplexer.ConnectAsync(new ConfigurationOptions()
 {
     AsyncTimeout = int.MaxValue,
     SyncTimeout = int.MaxValue,
     EndPoints = [ipEndPoint]
-})).GetDatabase();
+});
+var db = multiplexer.GetDatabase();
 
 var tests = new Tests(db, client);
 

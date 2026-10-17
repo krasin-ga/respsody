@@ -15,6 +15,7 @@ public class ParallelBenchmark
     private readonly List<Task> _tasks = new(OperationsPerInvoke);
     private RespClient _client = null!;
     private IDatabase _stackExchangeDb = null!;
+    private ConnectionMultiplexer _stackExchangeConnection = null!;
 
     [GlobalSetup]
     public void Setup()
@@ -22,7 +23,8 @@ public class ParallelBenchmark
         ThreadPool.SetMaxThreads(Environment.ProcessorCount, Environment.ProcessorCount);
 
         _client = new RespClientFactory().Create(BenchmarkEnvironment.RespServerEndpoint).Result;
-        _stackExchangeDb = ConnectionMultiplexer.Connect(new ConfigurationOptions { EndPoints = [BenchmarkEnvironment.RespServerEndpoint] }).GetDatabase();
+        _stackExchangeConnection = ConnectionMultiplexer.Connect(new ConfigurationOptions { EndPoints = [BenchmarkEnvironment.RespServerEndpoint] });
+        _stackExchangeDb = _stackExchangeConnection.GetDatabase();
 
         _client.Set(Key.Utf8("string"), Value.Utf8("string")).AsTask().Wait();
         _client.Set(Key.Unicode("string"), Value.Unicode("string")).AsTask().Wait();
@@ -31,6 +33,21 @@ public class ParallelBenchmark
         BenchmarkValidation.Validate(_client, _stackExchangeDb, Key.Utf8("string"), "string", "string"u8.ToArray());
         BenchmarkValidation.Validate(_client, _stackExchangeDb, Key.Utf8("json"), "json",
             Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new TestJsonObj())));
+    }
+
+    [GlobalCleanup]
+    public void Cleanup()
+    {
+        try
+        {
+            _client?.Dispose();
+        }
+        finally
+        {
+            _client = null!;
+            _stackExchangeConnection?.Dispose();
+            _stackExchangeConnection = null!;
+        }
     }
 
     [Benchmark(Description = "[when_all 12_500 tasks] [Respsody] Get (noop) commands/s", OperationsPerInvoke = OperationsPerInvoke)]

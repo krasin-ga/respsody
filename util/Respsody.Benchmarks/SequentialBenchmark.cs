@@ -17,6 +17,7 @@ public class SequentialBenchmark
     private static FrozenDictionary<int, (Key Key, RedisKey RKey, byte[] Value)> _payloads = null!;
     private RespClient _respsody = null!;
     private IDatabase _stackExchangeDb = null!;
+    private ConnectionMultiplexer _stackExchangeConnection = null!;
 
     [Params(256, 32786)]
     public int MessageSize = 0;
@@ -31,7 +32,8 @@ public class SequentialBenchmark
             new DefaultConnectionProcedure(new ConnectionOptions { Endpoint = endPoint.ToString() })
         ).Result;
 
-        _stackExchangeDb = ConnectionMultiplexer.Connect(new ConfigurationOptions { EndPoints = [endPoint] }).GetDatabase();
+        _stackExchangeConnection = ConnectionMultiplexer.Connect(new ConfigurationOptions { EndPoints = [endPoint] });
+        _stackExchangeDb = _stackExchangeConnection.GetDatabase();
 
         _payloads = GetType().GetField(nameof(MessageSize))?.GetCustomAttribute<ParamsAttribute>()!
             .Values.Select(v => (int)v!)
@@ -49,6 +51,21 @@ public class SequentialBenchmark
         SE_MSet_MGet_10().GetAwaiter().GetResult();
         var payload = GetPayload(MessageSize);
         BenchmarkValidation.Validate(_respsody, _stackExchangeDb, payload.Key, payload.RKey, payload.Value);
+    }
+
+    [GlobalCleanup]
+    public void Cleanup()
+    {
+        try
+        {
+            _respsody?.Dispose();
+        }
+        finally
+        {
+            _respsody = null!;
+            _stackExchangeConnection?.Dispose();
+            _stackExchangeConnection = null!;
+        }
     }
 
     [Benchmark]
