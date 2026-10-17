@@ -1,5 +1,6 @@
 ﻿using System.Buffers;
 using System.Text.Json;
+using System.Text;
 using BenchmarkDotNet.Attributes;
 using Respsody.Benchmarks.Library;
 using Respsody.Client;
@@ -26,6 +27,10 @@ public class ParallelBenchmark
         _client.Set(Key.Utf8("string"), Value.Utf8("string")).AsTask().Wait();
         _client.Set(Key.Unicode("string"), Value.Unicode("string")).AsTask().Wait();
         _client.Set(Key.Utf8("json"), Value.Utf8(JsonSerializer.Serialize(new TestJsonObj()))).AsTask().Wait();
+
+        BenchmarkValidation.Validate(_client, _stackExchangeDb, Key.Utf8("string"), "string", "string"u8.ToArray());
+        BenchmarkValidation.Validate(_client, _stackExchangeDb, Key.Utf8("json"), "json",
+            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new TestJsonObj())));
     }
 
     [Benchmark(Description = "[when_all 12_500 tasks] [Respsody] Get (noop) commands/s", OperationsPerInvoke = OperationsPerInvoke)]

@@ -128,7 +128,7 @@ return;
 static KeyValuePair<string, byte[]> CreatePair(int size) =>
     new(size + "__k", Enumerable.Range(0, size).Select(b => (byte)b).ToArray());
 
-static async Task<BenchmarkResult> RunTest<T>(
+async Task<BenchmarkResult> RunTest<T>(
     TypedTest<T> test,
     Target target,
     T[] values,
@@ -140,6 +140,7 @@ static async Task<BenchmarkResult> RunTest<T>(
 {
     Console.WriteLine($"Starting test {exp} / {target}");
     Console.WriteLine($"Dataset: {valuesExp}");
+    var expectedResult = Tests.ExpectedResult(test.Method.Name, values);
 
     const int warmUpIterations = 2;
     Console.Write("Warming up...");
@@ -147,11 +148,12 @@ static async Task<BenchmarkResult> RunTest<T>(
     for (var i = 0; i < warmUpIterations; i++)
     {
         var warmUpSw = Stopwatch.StartNew();
-        await test(target, values);
+        ValidateResult(await test(target, values));
         Console.Write($"..{i+1} ({warmUpSw.Elapsed})");
     }
 
     Console.WriteLine();
+    await tests.ValidateStoredValues(target, values);
 
     if (iterations == 0)
         return null!;
@@ -171,11 +173,12 @@ static async Task<BenchmarkResult> RunTest<T>(
         var beforeAllocs = GC.GetTotalAllocatedBytes(precise: true);
 
         sw.Restart();
-        await test(target, values);
+        var result = await test(target, values);
         sw.Stop();
 
         var afterAllocs = GC.GetTotalAllocatedBytes(precise: true);
         var afterCpuTime = CpuTime.GetActualValue();
+        ValidateResult(result);
 
         var allocationDelta = new Delta<long>(beforeAllocs, afterAllocs);
         if (!allocationDelta.IsIncreasingOrEq)
@@ -193,6 +196,7 @@ static async Task<BenchmarkResult> RunTest<T>(
             ));
     }
 
+    await tests.ValidateStoredValues(target, values);
     GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
     GC.Collect();
 
@@ -208,6 +212,12 @@ static async Task<BenchmarkResult> RunTest<T>(
         TotalAllocated: new SizeInBytes(measurements.Aggregate(0L, (acc, m) => acc + (m.Allocations.After - m.Allocations.Before))),
         TotalMemory: new SizeInBytes(GC.GetTotalMemory(forceFullCollection: false))
     );
+
+    void ValidateResult(int result)
+    {
+        if (result != expectedResult)
+            throw new InvalidOperationException($"{exp} / {target} returned {result}; expected {expectedResult}.");
+    }
 
     static int GetDataLength(T v)
     {

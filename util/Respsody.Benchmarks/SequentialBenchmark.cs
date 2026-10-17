@@ -42,6 +42,13 @@ public class SequentialBenchmark
                     new RedisKey($"seq_bench_{v}"),
                     Enumerable.Range(0, v).Select(i => (byte)i).ToArray()
                 ))!;
+
+        Respsody_Set_Get().GetAwaiter().GetResult();
+        SE_Set_Get().GetAwaiter().GetResult();
+        Respsody_MSet_MGet_10().GetAwaiter().GetResult();
+        SE_MSet_MGet_10().GetAwaiter().GetResult();
+        var payload = GetPayload(MessageSize);
+        BenchmarkValidation.Validate(_respsody, _stackExchangeDb, payload.Key, payload.RKey, payload.Value);
     }
 
     [Benchmark]

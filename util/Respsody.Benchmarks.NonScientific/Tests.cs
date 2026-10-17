@@ -1,6 +1,7 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using Respsody.Benchmarks.NonScientific.Library;
 using Respsody.Client;
+using Respsody.Resp;
 using StackExchange.Redis;
 
 namespace Respsody.Benchmarks.NonScientific;
@@ -16,7 +17,7 @@ public class Tests(IDatabaseAsync db, IRespClient client)
             await client.Mset(rspValues);
             using var results = await client.Mget(rspKeys);
 
-            return 0;
+            return results.Length;
         }
 
         var (seValues, seKeys) = DataCache.AsSe(values);
@@ -100,7 +101,7 @@ public class Tests(IDatabaseAsync db, IRespClient client)
                                        using var val2 = await client.Get(v.Key);
                                    })))
             {
-                CheckResult(res);
+                await res;
                 i++;
             }
 
@@ -120,7 +121,7 @@ public class Tests(IDatabaseAsync db, IRespClient client)
                                    await db.StringGetAsync(v.Key);
                                })))
         {
-            CheckResult(res);
+            await res;
             j++;
         }
 
@@ -239,7 +240,7 @@ public class Tests(IDatabaseAsync db, IRespClient client)
                                        using var val = await client.Get(v.Key);
                                    })))
             {
-                CheckResult(res);
+                await res;
                 i++;
             }
 
@@ -257,7 +258,7 @@ public class Tests(IDatabaseAsync db, IRespClient client)
                                    await db.StringGetAsync(v.Key);
                                })))
         {
-            CheckResult(res);
+            await res;
             j++;
         }
 
@@ -299,22 +300,61 @@ public class Tests(IDatabaseAsync db, IRespClient client)
                                async v =>
                                {
                                    await db.StringSetAsync(v.Key, v.Value);
-                                   await db.StringGetAsync(v.Key);
+                                   var result = await db.StringGetAsync(v.Key);
+                                   return (int)result.Length();
                                })))
         {
-            CheckResult(res);
-            j++;
+            j += 1 + await res;
         }
 
         return j;
     }
 
-    private static void CheckResult(Task res)
+    public static int ExpectedResult<T>(string scenario, T[] values)
     {
-        if (res.IsFaulted)
+        return scenario switch
         {
-            Console.WriteLine(res.Exception);
-            Environment.FailFast("Test failed");
+            nameof(MSetGet) or nameof(SetGet_WhenEach) or nameof(OneSetTwoGets_WhenEach) => values.Length,
+            nameof(SetGet_Sequential) => values.Cast<KeyValuePair<string, byte[]>>().Sum(v => v.Value.Length),
+            nameof(SetGet_WhenEach_Adapted) => values.Length + values.Cast<KeyValuePair<string, byte[]>>().Sum(v => v.Value.Length),
+            nameof(SetGet_Sequential_WithJsonDeserialize) => JsonVectorLength(values),
+            nameof(SetGet_WhenEach_WithJsonDeserialize) => values.Length + JsonVectorLength(values),
+            nameof(SetGet_WhenEach_WithJsonSerializeDeserialize) => values.Length + values.Cast<SampleJson>().Sum(v => v.VectorValue.Length),
+            _ => throw new ArgumentException($"No expected result is defined for {scenario}.", nameof(scenario))
+        };
+
+        static int JsonVectorLength(T[] source) => source.Cast<KeyValuePair<string, byte[]>>()
+            .Sum(v => JsonSerializer.Deserialize(v.Value, SampleJsonSerializerContext.Default.SampleJson)!.VectorValue.Length);
+    }
+
+    public async Task ValidateStoredValues<T>(Target target, T[] values)
+    {
+        var expected = values.Select(value => value switch
+        {
+            KeyValuePair<string, byte[]> pair => pair,
+            SampleJson json => new KeyValuePair<string, byte[]>(json.StringValue,
+                JsonSerializer.SerializeToUtf8Bytes(json, SampleJsonSerializerContext.Default.SampleJson)),
+            _ => throw new ArgumentException("Unsupported benchmark dataset.", nameof(values))
+        }).ToArray();
+
+        if (target is Target.Respsody)
+        {
+            using var response = await client.Mget(expected.Select(pair => Key.Utf8(pair.Key)).ToArray());
+            if (response.Length != expected.Length)
+                throw new InvalidOperationException("MGET returned an unexpected number of values.");
+            for (var index = 0; index < expected.Length; index++)
+                if (!response[index].ToRespString().GetSpan().SequenceEqual(expected[index].Value))
+                    throw new InvalidOperationException($"Unexpected value for {expected[index].Key}.");
+        }
+        else
+        {
+            var response = await db.StringGetAsync(expected.Select(pair => (RedisKey)pair.Key).ToArray());
+            if (response.Length != expected.Length)
+                throw new InvalidOperationException("MGET returned an unexpected number of values.");
+            for (var index = 0; index < expected.Length; index++)
+                if (!((ReadOnlyMemory<byte>)response[index]).Span.SequenceEqual(expected[index].Value))
+                    throw new InvalidOperationException($"Unexpected value for {expected[index].Key}.");
         }
     }
 }
+
