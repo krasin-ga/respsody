@@ -19,22 +19,24 @@ public class StandardMemoryBlocksPool(long memoryLimitInBytes = 512 * 1024 * 102
 
     public (MemoryBlock Block, bool IsNewlyCreated) Lease(int blockSize)
     {
-        var pool = GetPool(blockSize);
+        var pool = GetPool(blockSize, out var capacity);
         if (pool.TryPop(out var block))
         {
             Interlocked.Add(ref _accumulatedBytes, -block.Size);
             return (block, IsNewlyCreated: false);
         }
 
-        block = new MemoryBlock(blockSize);
+        block = new MemoryBlock(capacity);
 
         return (block, IsNewlyCreated: true);
     }
 
-    private InnerPool GetPool(int blockSize)
+    private InnerPool GetPool(int blockSize, out int capacity)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(blockSize);
+        capacity = (int)Math.Max(64u, BitOperations.RoundUpToPowerOf2((uint)blockSize));
         const int minBlockSizeIdx = 7; // 64 bytes
-        var index = BitOperations.RoundUpToPowerOf2((uint)blockSize) switch
+        var index = capacity switch
         {
             0 => minBlockSizeIdx,
             1 => minBlockSizeIdx,
@@ -74,13 +76,17 @@ public class StandardMemoryBlocksPool(long memoryLimitInBytes = 512 * 1024 * 102
 
     public void Return(MemoryBlock memoryBlock)
     {
+        var pool = GetPool(memoryBlock.Size, out var capacity);
+        if (memoryBlock.Size != capacity)
+            return;
+
         if (Interlocked.Add(ref _accumulatedBytes, memoryBlock.Size) > memoryLimitInBytes)
         {
             Interlocked.Add(ref _accumulatedBytes, -memoryBlock.Size);
             return;
         }
 
-        GetPool(memoryBlock.Size).Push(memoryBlock);
+        pool.Push(memoryBlock);
     }
 
     private class InnerPool()

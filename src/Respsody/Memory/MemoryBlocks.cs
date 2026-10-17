@@ -36,7 +36,7 @@ public sealed class MemoryBlocks(IMemoryBlocksPool? pool = null)
         if (!isNewlyCreated)
             return block;
 
-        OnBlockCreated(blockSize);
+        OnBlockCreated(block.Size);
 
         return block;
     }
