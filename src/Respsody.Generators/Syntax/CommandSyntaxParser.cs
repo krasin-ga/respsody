@@ -9,7 +9,7 @@ internal class CommandSyntaxParser
         var rootNode = rawParser.Parse(commandSyntax);
 
         if (!rootNode.Children.Any())
-            throw new Exception();
+            throw new FormatException("Command definition must contain a command name.");
 
         var commandNode = new CommandSyntaxNode(
             rootNode.Children[0].Value);

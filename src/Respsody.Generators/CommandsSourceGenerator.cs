@@ -16,7 +16,7 @@ internal class CommandsSourceGenerator : IIncrementalGenerator
     private static readonly DiagnosticDescriptor ErrorRule = new(
         id: "CommandsSourceGeneratorError",
         title: "RSP1001: RESP command generation failed",
-        messageFormat: "Generation failed because of exception: {0}",
+        messageFormat: "Invalid RESP command definition: {0}",
         category: "Usage",
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
@@ -43,7 +43,7 @@ internal class CommandsSourceGenerator : IIncrementalGenerator
         context.RegisterSourceOutput(
             parsingErrors,
             (spc, ctx) => spc.ReportDiagnostic(
-                Diagnostic.Create(ErrorRule, ctx.Location, ctx.Exception)
+                Diagnostic.Create(ErrorRule, ctx.Location, ctx.Exception.Message)
             ));
 
         context.RegisterSourceOutput(parsedCommandsGroups, CreateOutput);
