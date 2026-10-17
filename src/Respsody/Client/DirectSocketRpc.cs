@@ -99,6 +99,8 @@ public sealed class DirectSocketRpc: IDisposable
 
     public void Dispose()
     {
+        _frameAggregationStrategy.Reset();
         _sequence.Dispose();
+        _semaphoreSlim.Dispose();
     }
 }
