@@ -161,8 +161,6 @@ public sealed class RespClient(
             if (responseType == ResponseType.Subscription)
             {
                 subAcks = CommandParser.ParseArgumentsSlow(command);
-                cancellationToken = CancellationToken.None;
-                command.WithTimeout(int.MaxValue);
             }
 
             var payload = new Payload(
@@ -296,22 +294,15 @@ public sealed class RespClient(
         {
             if (aggregate.ToRespPush(_dummyGuard).TryGetSubscription(out var data))
             {
-                var idx = 0;
                 foreach (var confirmation in _subUnSubConfirmationsQueue)
                 {
                     if (confirmation.Handle(data.Command, data.Ack) is var res &&
                         res != SubUnSub.HandleResult.Unhandled)
                     {
-                        if (_responseQueue.TryPeek(out var peeked) &&
-                            peeked.IsSubscription(confirmation.Command, confirmation.Acks))
-                            _responseQueue.TryDequeue(out _);
-
-                        if (idx == 0 && res == SubUnSub.HandleResult.Completed)
-                            _subUnSubConfirmationsQueue.TryDequeue(out _);
+                        if (res == SubUnSub.HandleResult.Completed)
+                            DequeueCompletedSubscriptions();
                         break;
                     }
-
-                    idx++;
                 }
 
                 aggregate.Dispose();
@@ -341,6 +332,12 @@ public sealed class RespClient(
 
         if (frame.Context.Type is RespType.BulkError or RespType.SimpleError)
         {
+            if (_subUnSubConfirmationsQueue.TryPeek(out var confirmation)
+                && payload.IsSubscription(confirmation.Command, confirmation.Acks))
+            {
+                _subUnSubConfirmationsQueue.TryDequeue(out _);
+                DequeueCompletedSubscriptions();
+            }
             attribute?.Dispose();
             using var errorString = new RespString(frame, payload.Guard);
             var exception = new RespErrorResponseException(errorString.ToString(Encoding.UTF8) ?? "NULL");
@@ -349,6 +346,19 @@ public sealed class RespClient(
         }
 
         payload.Complete(frame, ticks, attribute);
+    }
+
+    private void DequeueCompletedSubscriptions()
+    {
+        while (_subUnSubConfirmationsQueue.TryPeek(out var confirmation) && confirmation.IsDone)
+        {
+            if (!_responseQueue.TryPeek(out var response)
+                || !response.IsSubscription(confirmation.Command, confirmation.Acks))
+                break;
+
+            _responseQueue.TryDequeue(out _);
+            _subUnSubConfirmationsQueue.TryDequeue(out _);
+        }
     }
 
     public void OnDisconnected(Exception? exception, int generation)
@@ -799,7 +809,7 @@ public sealed class RespClient(
         {
             return responseType is ResponseType.Subscription
                    && string.Equals(cmd, command, StringComparison.OrdinalIgnoreCase)
-                   && acks.SequenceEqual(subAcks!);
+                   && ReferenceEquals(acks, subAcks);
         }
     }
 
