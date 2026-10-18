@@ -21,22 +21,27 @@ public readonly struct RespBigNumber : IRespResponse
 
     public BigInteger ToBigInteger()
     {
+        _guard.CheckDisposed();
+
         var span = _frame.Span[1..^2];
 
         var sign = 1;
-        BigInteger number = 0;
-
-        for (var i = 0; i < span.Length; i++)
+        if (!span.IsEmpty && span[0] is (byte)'-' or (byte)'+')
         {
-            var @byte = span[i];
+            sign = span[0] == '-' ? -1 : 1;
+            span = span[1..];
+        }
 
-            if (i == 0 && @byte == '-')
-            {
-                sign = -1;
-                continue;
-            }
+        if (span.IsEmpty)
+            throw new FormatException("Invalid RESP big number.");
 
-            number = number * 10 + (@byte - '0');
+        BigInteger number = 0;
+        foreach (var value in span)
+        {
+            var digit = value - '0';
+            if ((uint)digit > 9)
+                throw new FormatException("Invalid RESP big number.");
+            number = number * 10 + digit;
         }
 
         return number * sign;

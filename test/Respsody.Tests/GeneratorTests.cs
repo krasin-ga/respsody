@@ -1,0 +1,287 @@
+using System;
+using System.Collections.Immutable;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Text;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Respsody.Resp;
+using Xunit;
+
+namespace Respsody.Tests;
+
+public class GeneratorTests
+{
+    [Fact]
+    public void ExposesCancellationOnExecutionAndPreservesLegacyBuilderCalls()
+    {
+        var result = Generate("""
+            using Respsody;
+            using Respsody.Client;
+            using Respsody.Resp;
+            using System.Threading;
+            namespace Generated;
+            [RespCommand("PING", ResponseType.String)]
+            public static class Definitions;
+            public static class Usage
+            {
+                public static void CompileCalls(IRespClient client, CancellationToken token)
+                {
+                    using var ordinary = client.PingCommand();
+                    using var legacy = client.PingCommand(cancellationToken: token);
+                    _ = client.Ping(cancellationToken: token);
+                }
+            }
+            """);
+
+        AssertCompiles(result);
+        var methods = result.Output.GetTypeByMetadataName("Generated.PING")!
+            .GetMembers("PingCommand").OfType<IMethodSymbol>().ToArray();
+        Assert.Contains(methods, method => method.Parameters.Length == 1 && method.GetAttributes().IsEmpty);
+        Assert.Contains(methods, method => method.Parameters.Length == 2
+            && method.GetAttributes().Single().AttributeClass!.Name == "ObsoleteAttribute");
+        var warning = Assert.Single(result.Output.GetDiagnostics().Where(diagnostic => diagnostic.Id == "CS0618"));
+        Assert.Contains("Pass cancellation to ExecuteCommand", warning.GetMessage());
+
+        var executionMethods = result.Run.GeneratedTrees.Single().GetRoot().DescendantNodes()
+            .OfType<MethodDeclarationSyntax>().Where(method => method.Identifier.ValueText is "Ping" or "PingVoid")
+            .ToArray();
+        Assert.Equal(2, executionMethods.Length);
+        Assert.All(executionMethods, method =>
+        {
+            var invocations = method.DescendantNodes().OfType<InvocationExpressionSyntax>().ToArray();
+            Assert.Single(invocations[0].ArgumentList.Arguments);
+            Assert.Equal("cancellationToken", invocations[1].ArgumentList.Arguments[1].ToString());
+        });
+    }
+
+    [Theory]
+    [InlineData("ECHO TEXT=`unfinished")]
+    [InlineData("ECHO TEXT=`")]
+    [InlineData("ECHO FIRST=`complete` SECOND=`unfinished")]
+    public void ReportsUnterminatedBacktickLiterals(string pattern)
+    {
+        var result = Generate($$"""
+            using Respsody;
+            using Respsody.Resp;
+            namespace Generated;
+            [RespCommand({{SymbolDisplay.FormatLiteral(pattern, quote: true)}}, ResponseType.Void)]
+            public static class Definitions;
+            """);
+
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal(DiagnosticSeverity.Error, diagnostic.Severity);
+        Assert.Equal("CommandsSourceGeneratorError", diagnostic.Id);
+        Assert.Equal("Invalid RESP command definition: Unterminated backtick literal: expected a closing `.",
+            diagnostic.GetMessage());
+        Assert.True(diagnostic.Location.IsInSource);
+        Assert.Null(Assert.Single(result.Run.Results).Exception);
+        Assert.Empty(result.Run.GeneratedTrees);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" \t\r\n")]
+    public void ReportsAnActionableDiagnosticForEmptyCommands(string pattern)
+    {
+        var result = Generate($$"""
+            using Respsody;
+            using Respsody.Resp;
+            namespace Generated;
+            [RespCommand({{SymbolDisplay.FormatLiteral(pattern, quote: true)}}, ResponseType.Void)]
+            public static class InvalidDefinitions;
+            [RespCommand("PING", ResponseType.String)]
+            public static class ValidDefinitions;
+            """);
+
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal(DiagnosticSeverity.Error, diagnostic.Severity);
+        Assert.Equal("CommandsSourceGeneratorError", diagnostic.Id);
+        Assert.Equal("Invalid RESP command definition: Command definition must contain a command name.",
+            diagnostic.GetMessage());
+        Assert.True(diagnostic.Location.IsInSource);
+        Assert.Null(Assert.Single(result.Run.Results).Exception);
+        Assert.NotNull(result.Output.GetTypeByMetadataName("Generated.PING"));
+    }
+
+    [Fact]
+    public void GeneratesTheSameApiAcrossCultures()
+    {
+        const string source = """
+            using Respsody;
+            using Respsody.Resp;
+            namespace Generated;
+            [RespCommand("INCR key [LIMIT] [ITEM ...]", ResponseType.Number)]
+            public static class Definitions;
+            """;
+        var originalCulture = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("en-US");
+            var english = Generate(source);
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("tr-TR");
+            var turkish = Generate(source);
+
+            AssertCompiles(english);
+            AssertCompiles(turkish);
+            Assert.Equal(english.Run.GeneratedTrees.Single().ToString(),
+                turkish.Run.GeneratedTrees.Single().ToString());
+            var command = turkish.Output.GetTypeByMetadataName("Generated.INCR")!;
+            Assert.NotEmpty(command.GetMembers("Incr"));
+            Assert.NotEmpty(command.GetMembers("IncrVoid"));
+            Assert.Contains(command.GetMembers().OfType<IMethodSymbol>()
+                .SelectMany(method => method.Parameters), parameter => parameter.Name == "limit");
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = originalCulture;
+        }
+    }
+
+    [Theory]
+    [InlineData("RespCommand")]
+    [InlineData("RespCommandAttribute")]
+    [InlineData("global::Respsody.RespCommand")]
+    [InlineData("CommandAlias")]
+    [InlineData("LibraryAlias.RespCommand")]
+    public void RecognizesAttributeAliases(string attributeName)
+    {
+        var result = Generate($$"""
+            using Respsody;
+            using Respsody.Resp;
+            using CommandAlias = Respsody.RespCommandAttribute;
+            using LibraryAlias = Respsody;
+            namespace Generated;
+            [{{attributeName}}("PING", ResponseType.String)]
+            public static class Definitions;
+            """);
+
+        AssertCompiles(result);
+        Assert.NotNull(result.Output.GetTypeByMetadataName("Generated.PING"));
+    }
+
+    [Fact]
+    public void IgnoresAttributesFromAnUnrelatedNamespace()
+    {
+        var result = Generate("""
+            namespace Foo.Respsody
+            {
+                public sealed class RespCommandAttribute : System.Attribute
+                {
+                    public RespCommandAttribute(string command, global::Respsody.Resp.ResponseType type) { }
+                }
+            }
+            namespace Generated
+            {
+                [Foo.Respsody.RespCommand("PING", global::Respsody.Resp.ResponseType.String)]
+                public static class Definitions;
+            }
+            """);
+
+        AssertCompiles(result);
+        Assert.Empty(result.Run.GeneratedTrees);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void EscapesLiteralWireValues(bool reduced)
+    {
+        const string value = "a\"b\\c\té\0";
+        var pattern = reduced ? $"ECHO CONSTANT=`{value}` key" : $"ECHO key CONSTANT=`{value}` [key ...]";
+        var result = Generate($$"""
+            using Respsody;
+            using Respsody.Resp;
+            namespace Generated;
+            [RespCommand({{SymbolDisplay.FormatLiteral(pattern, quote: true)}}, ResponseType.Void)]
+            public static class Definitions;
+            """);
+        AssertCompiles(result);
+
+        var literal = result.Run.GeneratedTrees.Single().GetRoot().DescendantNodes()
+            .OfType<LiteralExpressionSyntax>()
+            .First(node => node.IsKind(SyntaxKind.Utf8StringLiteralExpression));
+        var probe = CSharpSyntaxTree.ParseText($$"""
+            public static class Probe
+            {
+                public static byte[] Bytes() => ({{literal}}).ToArray();
+            }
+            """, new CSharpParseOptions(LanguageVersion.CSharp12));
+        using var stream = new MemoryStream();
+        var emitted = result.Output.AddSyntaxTrees(probe).Emit(stream);
+        Assert.True(emitted.Success, string.Join(Environment.NewLine, emitted.Diagnostics));
+        var assembly = Assembly.Load(stream.ToArray());
+
+        var bulkString = $"${Encoding.UTF8.GetByteCount(value)}\r\n{value}\r\n";
+        Assert.Equal(Encoding.UTF8.GetBytes(bulkString),
+            (byte[])assembly.GetType("Generated.ECHO+Options+CONSTANT")!
+                .GetField("BulkString")!.GetValue(null)!);
+        var expectedLiteral = reduced ? $"*3\r\n$4\r\nECHO\r\n{bulkString}" : "*3\r\n$4\r\nECHO\r\n";
+        Assert.Equal(Encoding.UTF8.GetBytes(expectedLiteral),
+            (byte[])assembly.GetType("Probe")!.GetMethod("Bytes")!.Invoke(null, null)!);
+    }
+
+    [Fact]
+    public void PreservesPermutedCommandOverloads()
+    {
+        var result = Generate("""
+            using Respsody;
+            using Respsody.Client;
+            using Respsody.Resp;
+            namespace Generated;
+            [RespCommand("ORDER A B", ResponseType.Void)]
+            [RespCommand("ORDER B A", ResponseType.Void)]
+            public static class Definitions;
+            public static class Usage
+            {
+                public static void CompileBoth(IRespClient client)
+                {
+                    using var first = client.OrderCommand(ORDER.A, ORDER.B);
+                    using var second = client.OrderCommand(ORDER.B, ORDER.A);
+                }
+            }
+            """);
+
+        AssertCompiles(result);
+        Assert.Equal(2, result.Output.GetTypeByMetadataName("Generated.ORDER")!
+            .GetMembers("OrderCommand").OfType<IMethodSymbol>().Count(method => method.GetAttributes().IsEmpty));
+    }
+
+    private static GenerationResult Generate(string source)
+    {
+        var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
+            .Split(Path.PathSeparator)
+            .Append(typeof(RespCommandAttribute).Assembly.Location)
+            .Append(typeof(ResponseType).Assembly.Location)
+            .Distinct()
+            .Select(path => MetadataReference.CreateFromFile(path));
+        var parseOptions = new CSharpParseOptions(LanguageVersion.CSharp12);
+        var compilation = CSharpCompilation.Create(
+            "GeneratorRegression_" + Guid.NewGuid().ToString("N"),
+            [CSharpSyntaxTree.ParseText(source, parseOptions)],
+            references,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        var generatorType = Assembly.Load("Respsody.Generators")
+            .GetType("Respsody.Generators.CommandsSourceGenerator", throwOnError: true)!;
+        var generator = (IIncrementalGenerator)Activator.CreateInstance(generatorType, nonPublic: true)!;
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            [generator.AsSourceGenerator()], parseOptions: parseOptions);
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var output, out var diagnostics);
+        return new GenerationResult(output, driver.GetRunResult(), diagnostics);
+    }
+
+    private static void AssertCompiles(GenerationResult result)
+    {
+        var errors = result.Diagnostics.Concat(result.Output.GetDiagnostics())
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        Assert.True(!errors.Any(), string.Join(Environment.NewLine, errors));
+    }
+
+    private sealed record GenerationResult(
+        Compilation Output,
+        GeneratorDriverRunResult Run,
+        ImmutableArray<Diagnostic> Diagnostics);
+}

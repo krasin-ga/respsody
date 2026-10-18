@@ -17,6 +17,12 @@ using Respsody.Client.Connection.Options;
 using Respsody.Client.Options;
 using StackExchange.Redis;
 
+if (!args.Contains("--legacy", StringComparer.Ordinal))
+{
+    await Respsody.Benchmarks.NonScientific.Comparison.ComparisonRunner.Run(args);
+    return;
+}
+
 // ReSharper disable All
 ThreadPool.SetMaxThreads(Environment.ProcessorCount, Environment.ProcessorCount);
 
@@ -26,7 +32,7 @@ var ipEndPoint = new IPEndPoint(IPAddress.Loopback, 6379);
 
 // using var garnet = new GarnetServer(
 //     new GarnetServerOptions
-//     {
+//     {w
 //         EndPoints = [ipEndPoint],
 //         logger = new ConsoleLoggerProvider(
 //                 new OptionsMonitor<ConsoleLoggerOptions>(
@@ -60,7 +66,7 @@ var jsons_10K = srcJsons_10K.Select(
 ).ToArray();
 
 var clientFactory = new RespClientFactory();
-var client = await clientFactory.Create(
+using var client = await clientFactory.Create(
     new RespClientOptions()
     {
         //Handler = new RespClientHandler()
@@ -68,12 +74,13 @@ var client = await clientFactory.Create(
     new DefaultConnectionProcedure(new ConnectionOptions() { Endpoint = ipEndPoint.ToString() })
 );
 
-var db = (await ConnectionMultiplexer.ConnectAsync(new ConfigurationOptions()
+using var multiplexer = await ConnectionMultiplexer.ConnectAsync(new ConfigurationOptions()
 {
     AsyncTimeout = int.MaxValue,
     SyncTimeout = int.MaxValue,
     EndPoints = [ipEndPoint]
-})).GetDatabase();
+});
+var db = multiplexer.GetDatabase();
 
 var tests = new Tests(db, client);
 
@@ -128,7 +135,7 @@ return;
 static KeyValuePair<string, byte[]> CreatePair(int size) =>
     new(size + "__k", Enumerable.Range(0, size).Select(b => (byte)b).ToArray());
 
-static async Task<BenchmarkResult> RunTest<T>(
+async Task<BenchmarkResult> RunTest<T>(
     TypedTest<T> test,
     Target target,
     T[] values,
@@ -140,6 +147,7 @@ static async Task<BenchmarkResult> RunTest<T>(
 {
     Console.WriteLine($"Starting test {exp} / {target}");
     Console.WriteLine($"Dataset: {valuesExp}");
+    var expectedResult = Tests.ExpectedResult(test.Method.Name, values);
 
     const int warmUpIterations = 2;
     Console.Write("Warming up...");
@@ -147,11 +155,12 @@ static async Task<BenchmarkResult> RunTest<T>(
     for (var i = 0; i < warmUpIterations; i++)
     {
         var warmUpSw = Stopwatch.StartNew();
-        await test(target, values);
+        ValidateResult(await test(target, values));
         Console.Write($"..{i+1} ({warmUpSw.Elapsed})");
     }
 
     Console.WriteLine();
+    await tests.ValidateStoredValues(target, values);
 
     if (iterations == 0)
         return null!;
@@ -167,15 +176,16 @@ static async Task<BenchmarkResult> RunTest<T>(
 
     for (var i = 0; i < iterations; i++)
     {
-        var beforeAllocs = GC.GetTotalAllocatedBytes(precise: true);
         var beforeCpuTime = CpuTime.GetActualValue();
+        var beforeAllocs = GC.GetTotalAllocatedBytes(precise: true);
 
         sw.Restart();
-        await test(target, values);
+        var result = await test(target, values);
         sw.Stop();
 
-        var afterCpuTime = CpuTime.GetActualValue();
         var afterAllocs = GC.GetTotalAllocatedBytes(precise: true);
+        var afterCpuTime = CpuTime.GetActualValue();
+        ValidateResult(result);
 
         var allocationDelta = new Delta<long>(beforeAllocs, afterAllocs);
         if (!allocationDelta.IsIncreasingOrEq)
@@ -193,6 +203,7 @@ static async Task<BenchmarkResult> RunTest<T>(
             ));
     }
 
+    await tests.ValidateStoredValues(target, values);
     GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
     GC.Collect();
 
@@ -204,10 +215,16 @@ static async Task<BenchmarkResult> RunTest<T>(
         TotalElapsed: measurements.Aggregate(TimeSpan.Zero, (a, b) => a + b.Elapsed),
         BestRun: measurements.Select(r => r.Elapsed).Min(),
         CpuTime: measurements.Aggregate(TimeSpan.Zero, (acc, m) => acc + (m.Cpu.After - m.Cpu.Before)),
-        MinWastedCpuTime: measurements.Select(m => m.Cpu.After - m.Cpu.Before).Where(t => t > TimeSpan.Zero).Min(),
+        MinWastedCpuTime: measurements.Select(m => m.Cpu.After - m.Cpu.Before).Where(t => t > TimeSpan.Zero).DefaultIfEmpty().Min(),
         TotalAllocated: new SizeInBytes(measurements.Aggregate(0L, (acc, m) => acc + (m.Allocations.After - m.Allocations.Before))),
         TotalMemory: new SizeInBytes(GC.GetTotalMemory(forceFullCollection: false))
     );
+
+    void ValidateResult(int result)
+    {
+        if (result != expectedResult)
+            throw new InvalidOperationException($"{exp} / {target} returned {result}; expected {expectedResult}.");
+    }
 
     static int GetDataLength(T v)
     {

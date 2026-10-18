@@ -64,6 +64,7 @@ public class RespFrameAggregationStrategy(RespAggregatesPool slicesPool)
 
             var streamedString = _streamedString;
             _streamedString = null;
+            frame.Dispose();
 
             return AddOrReturn(new RespValueVariant(streamedString), out value);
         }
@@ -82,23 +83,23 @@ public class RespFrameAggregationStrategy(RespAggregatesPool slicesPool)
             {
                 ref var element = ref _stack[_stackPosition];
 
-                element.Aggregate.Add(variant);
+                var isEnd = element.Remaining <= Constants.StreamedLength
+                    && variant.Simple?.Context.Type == RespType.End;
+                if (isEnd)
+                    variant.Dispose();
+                else
+                {
+                    element.Aggregate.Add(variant);
+                    element.Remaining--;
+                }
 
-                var remaining = --element.Remaining;
-                if (remaining == 0 ||
-                    remaining < Constants.StreamedLength
-                    && variant.Simple?.Context.Type == RespType.End)
-                    if (--_stackPosition == -1)
-                    {
-                        respValueVariant = new RespValueVariant(element.Aggregate);
-                        element = default;
-                        return true;
-                    }
-                    else
-                    {
-                        variant = new RespValueVariant(element.Aggregate);
-                        continue;
-                    }
+                if (element.Remaining == 0 || isEnd)
+                {
+                    variant = new RespValueVariant(element.Aggregate);
+                    element = default;
+                    _stackPosition--;
+                    continue;
+                }
 
                 respValueVariant = default;
                 return false;
@@ -111,7 +112,13 @@ public class RespFrameAggregationStrategy(RespAggregatesPool slicesPool)
 
     public void Reset()
     {
+        for (var i = 0; i <= _stackPosition; i++)
+        {
+            _stack[i].Aggregate.Dispose();
+            _stack[i] = default;
+        }
         _stackPosition = -1;
+        _streamedString?.Dispose();
         _streamedString = null;
     }
 

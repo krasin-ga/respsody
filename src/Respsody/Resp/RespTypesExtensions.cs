@@ -87,6 +87,8 @@ public static class RespTypesExtensions
 
     public static RespArray ToRespArray(this in OwnedRespValueVariant ownedRespValueVariant)
     {
+        ownedRespValueVariant.Guard.CheckDisposed();
+
         var variant = ownedRespValueVariant.Variant;
 
         if (variant.Aggregate is not { } agg || !RespArray.CanConvert(agg.HeaderFrame))
@@ -97,6 +99,8 @@ public static class RespTypesExtensions
 
     public static RespMap ToRespMap(this in OwnedRespValueVariant ownedRespValueVariant)
     {
+        ownedRespValueVariant.Guard.CheckDisposed();
+
         var variant = ownedRespValueVariant.Variant;
 
         if (variant.Aggregate is not { } agg || !RespMap.CanConvert(agg.HeaderFrame))
@@ -108,6 +112,8 @@ public static class RespTypesExtensions
 
     public static RespSet ToRespSet(this in OwnedRespValueVariant ownedRespValueVariant)
     {
+        ownedRespValueVariant.Guard.CheckDisposed();
+
         var variant = ownedRespValueVariant.Variant;
 
         if (variant.Aggregate is not { } agg || !RespSet.CanConvert(agg.HeaderFrame))
@@ -138,6 +144,8 @@ public static class RespTypesExtensions
 
         if (valueVariant.Simple.HasValue)
             return valueVariant.Simple.Value.ToClrValue(ownedRespValueVariant.Guard);
+
+        ownedRespValueVariant.Guard.CheckDisposed();
 
         var aggregate = valueVariant.Aggregate;
         if (aggregate is null)

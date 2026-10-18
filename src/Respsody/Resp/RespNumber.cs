@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Buffers.Text;
 using Respsody.Client;
 using Respsody.Memory;
 
@@ -24,23 +25,10 @@ public readonly struct RespNumber : IRespResponse
 
         var span = _frame.Span[1..^2];
 
-        var sign = 1;
-        var number = 0;
+        if (Utf8Parser.TryParse(span, out long number, out var consumed) && consumed == span.Length)
+            return number;
 
-        for (var i = 0; i < span.Length; i++)
-        {
-            var @byte = span[i];
-
-            if (i == 0 && @byte == '-')
-            {
-                sign = -1;
-                continue;
-            }
-
-            number = number * 10 + (@byte - '0');
-        }
-
-        return number * sign;
+        throw new FormatException("Invalid RESP integer.");
     }
 
     public void Dispose()

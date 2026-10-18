@@ -1,6 +1,7 @@
-﻿using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.CodeAnalysis;
 using System.Net.Sockets;
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using System.Threading.Channels;
 using Respsody.Exceptions;
 using Respsody.Memory;
@@ -18,9 +19,11 @@ public sealed class StructuredSocket<TIncoming, TPayload> : IDisposable
     private readonly TaskCompletionSource _initialConnectionTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly StructuredSocketOptions _options;
     private readonly Channel<Outgoing> _outgoingChannel;
-    private int _isStarted;
-    public bool IsDisposed { get; private set; }
+    private readonly Queue<Outgoing> _pendingOutgoing = new();
+    private int _state;
+    public bool IsDisposed => Volatile.Read(ref _state) == 2;
     public Task Connected => _initialConnectionTcs.Task;
+    internal Task Completion { get; private set; } = Task.CompletedTask;
 
     public StructuredSocket(
         IConnectionProcedure connectionProcedure,
@@ -56,76 +59,91 @@ public sealed class StructuredSocket<TIncoming, TPayload> : IDisposable
 
     public void Start()
     {
-        if (Interlocked.CompareExchange(ref _isStarted, 1, 0) != 0)
+        var state = Interlocked.CompareExchange(ref _state, 1, 0);
+        ObjectDisposedException.ThrowIf(state == 2, this);
+        if (state != 0)
             return;
 
-        _ = ReconnectionLoop();
+        Completion = ReconnectionLoop();
     }
 
     [SuppressMessage("ReSharper", "AccessToDisposedClosure")]
     private async Task ReconnectionLoop()
     {
+        await Task.Yield();
         var connectionGeneration = 0;
 
-        while (!_cts.Token.IsCancellationRequested)
+        try
+        {
+            while (!_cts.Token.IsCancellationRequested)
+            {
+                try
+                {
+                    _framing.Reset();
+                    var currentGeneration = ++connectionGeneration;
+                    using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+                    using var disconnectedBeatCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+
+                    var expirationCheck = SafeRun(() => HeartbeatLoop(disconnectedBeatCts.Token));
+
+                    ConnectedSocket connectedSocket;
+                    try
+                    {
+                        connectedSocket = await _connectionProcedure.Connect(linkedCts.Token);
+                    }
+                    catch (Exception)
+                    {
+                        await disconnectedBeatCts.CancelAsync();
+                        await expirationCheck;
+                        throw;
+                    }
+
+                    using var socket = connectedSocket.Socket;
+                    using var cancellation = linkedCts.Token.UnsafeRegister(static state => ((Socket)state!).Dispose(), socket);
+
+                    try
+                    {
+                        await _handler.InitializeConnection(connectedSocket, currentGeneration, linkedCts.Token);
+                        _initialConnectionTcs.TrySetResult();
+                    }
+                    finally
+                    {
+                        await disconnectedBeatCts.CancelAsync();
+                        await expirationCheck;
+                    }
+
+                    var receivingTask = SafeRun(() => ReceivingLoop(socket, linkedCts.Token));
+                    var sendingTask = SafeRun(() => SendingLoop(socket, currentGeneration, linkedCts.Token));
+                    if (await SafeRun(() => _handler.OnConnected(currentGeneration, linkedCts.Token).AsTask()) is { } connectionHandlerException)
+                    {
+                        _handler.HandleConnectionError(new RespOnConnectedCallbackException(connectionHandlerException));
+                        await linkedCts.CancelAsync();
+                    }
+
+                    var interruptionException = await await Task.WhenAny(receivingTask, sendingTask);
+                    await linkedCts.CancelAsync();
+
+                    foreach (var exception in await Task.WhenAll(receivingTask, sendingTask))
+                        interruptionException ??= exception;
+
+                    if (interruptionException is { })
+                        _handler.OnDisconnected(interruptionException, currentGeneration);
+                }
+                catch (Exception exception)
+                {
+                    _handler.HandleConnectionError(exception);
+                }
+            }
+        }
+        finally
         {
             try
             {
-                _framing.Reset();
-                var currentGeneration = ++connectionGeneration;
-                using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
-                using var disconnectedBeatCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
-
-                var expirationCheck = SafeRun(() => HeartbeatLoop(disconnectedBeatCts.Token));
-
-                ConnectedSocket connectedSocket;
-                try
-                {
-                    connectedSocket = await _connectionProcedure.Connect(linkedCts.Token);
-                }
-                catch (Exception)
-                {
-                    await disconnectedBeatCts.CancelAsync();
-                    await expirationCheck;
-                    throw;
-                }
-
-                using var socket = connectedSocket.Socket;
-
-                await _handler.InitializeConnection(connectedSocket, currentGeneration, linkedCts.Token);
-                _initialConnectionTcs.TrySetResult();
-
-                await disconnectedBeatCts.CancelAsync();
-                await expirationCheck;
-
-                var receivingTask = SafeRun(() => ReceivingLoop(socket, linkedCts.Token));
-                var sendingTask = SafeRun(() => SendingLoop(socket, currentGeneration, linkedCts.Token));
-                if (await SafeRun(() => _handler.OnConnected(currentGeneration, linkedCts.Token).AsTask()) is { } connectionHandlerException)
-                {
-                    _handler.HandleConnectionError(new RespOnConnectedCallbackException(connectionHandlerException));
-                    await linkedCts.CancelAsync();
-                }
-
-                var interruptionException = await await Task.WhenAny(receivingTask, sendingTask);
-                await linkedCts.CancelAsync();
-
-                var whenAll = Task.WhenAll(receivingTask, sendingTask);
-                while (!whenAll.IsCompleted)
-                {
-                    //signal noop to channel
-                    _channelWriter.TryWrite(default);
-                    await Task.Yield();
-                }
-
-                foreach (var exception in await whenAll)
-                    interruptionException ??= exception;
-
-                if (interruptionException is { })
-                    _handler.OnDisconnected(interruptionException, currentGeneration);
+                ReleaseQueued();
             }
-            catch (Exception exception)
+            finally
             {
-                _handler.HandleConnectionError(exception);
+                _framing.Dispose();
             }
         }
     }
@@ -133,124 +151,129 @@ public sealed class StructuredSocket<TIncoming, TPayload> : IDisposable
     private async Task SendingLoop(Socket socket, int connectionGen, CancellationToken token)
     {
         var outgoingChannel = _outgoingChannel.Reader;
+        using var wakeOnCancellation = token.UnsafeRegister(
+            static state => ((ChannelWriter<Outgoing>)state!).TryWrite(default), _channelWriter);
         var outgoingBuffer = new byte[_options.OutgoingBufferSize];
         var written = 0;
-        
-        while (await outgoingChannel.WaitToReadAsync(CancellationToken.None))
+
+        while (!token.IsCancellationRequested &&
+               (_pendingOutgoing.Count > 0 || await outgoingChannel.WaitToReadAsync()))
         {
             token.ThrowIfCancellationRequested();
-
             var ticks = Environment.TickCount;
-            while (outgoingChannel.TryRead(out var data))
+            while (!token.IsCancellationRequested &&
+                   (_pendingOutgoing.TryDequeue(out var data) || outgoingChannel.TryRead(out data)))
             {
                 var (single, multiple) = data;
-
                 if (single.HasValue)
                 {
                     var (buffer, payload) = single.Value;
-                    if (payload?.OnAboutToWrite(connectionGen, ticks) is false)
+                    try
                     {
-                        buffer.FreeByDeliveryPipeline();
-                        continue;
-                    }
-
-                    if (buffer.TryCopyTo(outgoingBuffer.AsSpan(written), out var bytesWritten))
-                    {
-                        buffer.FreeByDeliveryPipeline();
-                        written += bytesWritten;
-
-                        continue;
-                    }
-
-                    if (written > 0)
-                    {
-                        await SendInternal(socket, outgoingBuffer, written, token);
-                        ticks = Environment.TickCount;
-                        written = 0;
-                    }
-
-                    if (buffer.TryCopyTo(outgoingBuffer.AsSpan(written), out bytesWritten))
-                    {
-                        buffer.FreeByDeliveryPipeline();
-                        written += bytesWritten;
-                        continue;
-                    }
-
-                    await SendInternal(socket, buffer);
-                    ticks = Environment.TickCount;
-                    continue;
-                }
-
-                if (multiple is { })
-                {
-                    foreach (var transmitUnit in multiple)
-                    {
-                        var (buffer, payload) = transmitUnit;
                         if (payload?.OnAboutToWrite(connectionGen, ticks) is false)
-                        {
-                            buffer.FreeByDeliveryPipeline();
                             continue;
-                        }
 
                         if (buffer.TryCopyTo(outgoingBuffer.AsSpan(written), out var bytesWritten))
                         {
-                            buffer.FreeByDeliveryPipeline();
                             written += bytesWritten;
-
                             continue;
                         }
 
                         if (written > 0)
                         {
                             await SendInternal(socket, outgoingBuffer, written, token);
+                            ticks = Environment.TickCount;
                             written = 0;
                         }
 
-                        if (buffer.TryCopyTo(outgoingBuffer.AsSpan(written), out bytesWritten))
+                        if (buffer.TryCopyTo(outgoingBuffer, out bytesWritten))
                         {
-                            buffer.FreeByDeliveryPipeline();
-                            written += bytesWritten;
+                            written = bytesWritten;
                             continue;
                         }
 
                         await SendInternal(socket, buffer);
                         ticks = Environment.TickCount;
                     }
+                    finally
+                    {
+                        buffer.FreeByDeliveryPipeline();
+                    }
+                    continue;
+                }
+
+                if (multiple is not { })
+                    continue;
+
+                var index = 0;
+                try
+                {
+                    for (; index < multiple.Count; index++)
+                    {
+                        var (buffer, payload) = multiple[index];
+                        try
+                        {
+                            if (payload?.OnAboutToWrite(connectionGen, ticks) is false)
+                                continue;
+
+                            if (buffer.TryCopyTo(outgoingBuffer.AsSpan(written), out var bytesWritten))
+                            {
+                                written += bytesWritten;
+                                continue;
+                            }
+
+                            if (written > 0)
+                            {
+                                await SendInternal(socket, outgoingBuffer, written, token);
+                                ticks = Environment.TickCount;
+                                written = 0;
+                            }
+
+                            if (buffer.TryCopyTo(outgoingBuffer, out bytesWritten))
+                            {
+                                written = bytesWritten;
+                                continue;
+                            }
+
+                            await SendInternal(socket, buffer);
+                            ticks = Environment.TickCount;
+                        }
+                        finally
+                        {
+                            buffer.FreeByDeliveryPipeline();
+                        }
+                    }
+                }
+                finally
+                {
+                    Release(multiple, index + 1, Environment.TickCount);
                 }
             }
 
             if (written <= 0)
                 continue;
-
             await SendInternal(socket, outgoingBuffer, written, token);
             written = 0;
         }
     }
 
-    private async ValueTask SendInternal(
+    private ValueTask SendInternal(
         Socket socket,
         byte[] bytes,
         int length,
         CancellationToken token)
     {
-        await socket.SendAsync(
+        return SocketWriter.SendAllAsync(socket,
             bytes.AsMemory(0, length),
             _options.SendingFlags,
             token);
     }
 
-    private async ValueTask SendInternal(
+    private ValueTask SendInternal(
         Socket socket,
         OutgoingBuffer page)
     {
-        try
-        {
-            await socket.SendAsync(page.AsSegmentList(), _options.SendingFlags);
-        }
-        finally
-        {
-            page.FreeByDeliveryPipeline();
-        }
+        return SocketWriter.SendAllAsync(socket, page.AsSegmentList(), _options.SendingFlags);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
@@ -291,52 +314,140 @@ public sealed class StructuredSocket<TIncoming, TPayload> : IDisposable
         using var periodicTimer = new PeriodicTimer(_options.HeartbeatInterval);
 
         var reader = _outgoingChannel.Reader;
-        var writer = _outgoingChannel.Writer;
-
-        var alive = new List<Outgoing>();
         while (await periodicTimer.WaitForNextTickAsync(token))
         {
             var tickCount = Environment.TickCount;
-            while (reader.TryRead(out var data))
+            var pendingCount = _pendingOutgoing.Count;
+            for (var i = 0; i < pendingCount; i++)
             {
-                if (data.Single is { } single)
-                {
-                    if (single.Payload?.TryExpire(tickCount) is true)
-                    {
-                        single.Page.FreeByDeliveryPipeline();
-                        continue;
-                    }
-
-                    alive.Add(data);
-                }
-
-                if (data.Batch is not { } multiple)
-                    continue;
-
-                if (multiple[0].Payload?.TryExpire(tickCount) is not true)
-                    continue;
-
-                multiple[0].Page.FreeByDeliveryPipeline();
-
-                for (var i = 1; i < multiple.Count; i++)
-                {
-                    multiple[i].Payload?.LinkedCancel(tickCount);
-                    multiple[i].Page.FreeByDeliveryPipeline();
-                }
+                var pending = _pendingOutgoing.Dequeue();
+                if (!TryExpire(pending, tickCount))
+                    _pendingOutgoing.Enqueue(pending);
             }
 
-            foreach (var data in alive)
-                writer.TryWrite(data);
-
-            alive.Clear();
+            while (reader.TryRead(out var data))
+            {
+                if (!TryExpire(data, tickCount))
+                    _pendingOutgoing.Enqueue(data);
+            }
         }
+    }
+
+    private static bool TryExpire(in Outgoing data, int ticks)
+    {
+        if (data.Single is { } single)
+        {
+            try
+            {
+                if (single.Payload?.TryExpire(ticks) is not true)
+                    return false;
+            }
+            catch
+            {
+                Release(single, ticks);
+                throw;
+            }
+            single.Page.FreeByDeliveryPipeline();
+            return true;
+        }
+
+        if (data.Batch is not { Count: > 0 } multiple)
+            return true;
+
+        try
+        {
+            if (multiple[0].Payload?.TryExpire(ticks) is not true)
+                return false;
+        }
+        catch
+        {
+            Release(multiple, 0, ticks);
+            throw;
+        }
+
+        multiple[0].Page.FreeByDeliveryPipeline();
+        Release(multiple, 1, ticks);
+        return true;
     }
 
     public void Dispose()
     {
-        IsDisposed = true;
-        _channelWriter.Complete();
+        var state = Interlocked.Exchange(ref _state, 2);
+        if (state == 2)
+            return;
+        _channelWriter.TryComplete();
         _cts.Cancel();
+        _initialConnectionTcs.TrySetCanceled();
+        if (state == 0)
+        {
+            try
+            {
+                ReleaseQueued();
+            }
+            finally
+            {
+                _framing.Dispose();
+            }
+        }
+    }
+
+    private void ReleaseQueued()
+    {
+        var ticks = Environment.TickCount;
+        Exception? failure = null;
+        while (_pendingOutgoing.TryDequeue(out var outgoing) || _outgoingChannel.Reader.TryRead(out outgoing))
+        {
+            try
+            {
+                Release(outgoing, ticks);
+            }
+            catch (Exception exception)
+            {
+                failure ??= exception;
+            }
+        }
+
+        if (failure is not null)
+            ExceptionDispatchInfo.Throw(failure);
+    }
+
+    private static void Release(in Outgoing outgoing, int ticks)
+    {
+        if (outgoing.Single is { } single)
+            Release(single, ticks);
+        else if (outgoing.Batch is { } batch)
+            Release(batch, 0, ticks);
+    }
+
+    private static void Release(IReadOnlyList<TransmitUnit<TPayload>> batch, int start, int ticks)
+    {
+        Exception? failure = null;
+        for (var i = start; i < batch.Count; i++)
+        {
+            try
+            {
+                Release(batch[i], ticks);
+            }
+            catch (Exception exception)
+            {
+                failure ??= exception;
+            }
+        }
+
+        if (failure is not null)
+            ExceptionDispatchInfo.Throw(failure);
+    }
+
+    private static void Release(in TransmitUnit<TPayload> unit, int ticks)
+    {
+        try
+        {
+            unit.Payload?.LinkedCancel(ticks);
+        }
+        finally
+        {
+            unit.Page.FreeByDeliveryPipeline();
+        }
     }
 
     private static async Task<Exception?> SafeRun(Func<Task> taskFactory)

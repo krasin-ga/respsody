@@ -14,35 +14,36 @@ public readonly record struct SlotRange(ushort From, ushort To, SpecialSlotState
         var hasSpecialState = str.StartsWith('[');
         if (hasSpecialState)
         {
-            str = str.Trim('[', ']');
+            if (!str.EndsWith(']'))
+                throw new FormatException($"Unterminated cluster slot state: {str}");
+            str = str[1..^1];
 
             var importing = str.Split("-<-");
             var migrating = str.Split("->-");
-            if (importing.Length == 2)
+            if (importing.Length == 2 && importing[1].Length > 0)
             {
                 str = importing[0];
                 state = new SpecialSlotState(SpecialSlotState.Kind.Importing, importing[1]);
             }
-            else if (migrating.Length == 2)
+            else if (migrating.Length == 2 && migrating[1].Length > 0)
             {
                 str = migrating[0];
                 state = new SpecialSlotState(SpecialSlotState.Kind.Migrating, migrating[1]);
             }
             else
             {
-                throw new InvalidOperationException($"Failed to parse special state for string: {str}");
+                throw new FormatException($"Invalid cluster slot state: {str}");
             }
         }
 
         var split = str.Split('-');
-        if (split.Length == 1)
-        {
-            var slot = ushort.Parse(split[0]);
-            return new SlotRange(slot, slot, state);
-        }
+        if (split.Length is < 1 or > 2 || hasSpecialState && split.Length != 1
+            || !ushort.TryParse(split[0], out var from) || from >= 16384)
+            throw new FormatException($"Invalid cluster slot range: {str}");
 
-        var from = ushort.Parse(split[0]);
-        var to = ushort.Parse(split[1]);
+        var to = from;
+        if (split.Length == 2 && (!ushort.TryParse(split[1], out to) || to >= 16384 || to < from))
+            throw new FormatException($"Invalid cluster slot range: {str}");
 
         return new SlotRange(from, to, state);
     }

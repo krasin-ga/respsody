@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Containers;
@@ -12,14 +13,23 @@ public class RedisClusterFixture : IAsyncLifetime
 {
     private const int StartPort = 7000;
     private const int NodeCount = 9;
-    private const string NetworkName = "redis-cluster-net";
     private const string RedisPassword = "hi there";
     private readonly List<(IContainer Container, int Port)> _redisNodes = new();
     private INetwork? _network;
 
     public string GetRandomEndpoint()
     {
-        return $"localhost:{StartPort + Random.Shared.Next(0, NodeCount)}";
+        var (container, port) = _redisNodes[Random.Shared.Next(_redisNodes.Count)];
+        return $"{container.Hostname}:{container.GetMappedPublicPort(port)}";
+    }
+
+    public string GetHostEndpoint(string endpoint)
+    {
+        var port = int.Parse(endpoint.AsSpan(endpoint.LastIndexOf(':') + 1));
+        foreach (var (container, internalPort) in _redisNodes)
+            if (internalPort == port)
+                return $"{container.Hostname}:{container.GetMappedPublicPort(internalPort)}";
+        return endpoint;
     }
 
     public string GetPassword()
@@ -27,8 +37,20 @@ public class RedisClusterFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
+        try
+        {
+            await InitializeClusterAsync();
+        }
+        catch
+        {
+            await DisposeAsync();
+            throw;
+        }
+    }
+
+    private async Task InitializeClusterAsync()
+    {
         _network = new NetworkBuilder()
-            .WithName(NetworkName)
             .Build();
 
         await _network.CreateAsync();
@@ -36,12 +58,10 @@ public class RedisClusterFixture : IAsyncLifetime
         for (var i = 0; i < NodeCount; i++)
         {
             var port = StartPort + i;
-            var container = new ContainerBuilder()
-                .WithImage("redis:6.2")
-                .WithName($"redis-node-{port}")
+            var container = new ContainerBuilder("redis:6.2")
                 .WithNetwork(_network.Name)
                 .WithNetworkAliases($"redis-node-{port}")
-                .WithPortBinding(port, port)
+                .WithPortBinding(port, assignRandomHostPort: true)
                 .WithCommand(
                     "redis-server",
                     "--port",
@@ -92,10 +112,18 @@ public class RedisClusterFixture : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        foreach (var (container, _) in _redisNodes)
-            await container.StopAsync();
-
-        if (_network != null)
-            await _network.DeleteAsync();
+        var nodes = _redisNodes.ToArray();
+        _redisNodes.Clear();
+        var network = _network;
+        _network = null;
+        try
+        {
+            await Task.WhenAll(nodes.Select(node => node.Container.DisposeAsync().AsTask()));
+        }
+        finally
+        {
+            if (network is not null)
+                await network.DisposeAsync();
+        }
     }
 }

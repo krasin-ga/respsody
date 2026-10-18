@@ -118,7 +118,7 @@ internal class CommandNodeExplication(CommandSyntaxNode command)
         private bool Equals(Explication other)
         {
             return _nodes.Count == other._nodes.Count
-                   && _nodes.Zip(_nodes, (a, b) => a.Equals(b)).All(t => t);
+                   && _nodes.SequenceEqual(other._nodes);
         }
 
         public override bool Equals(object? obj)
@@ -134,7 +134,13 @@ internal class CommandNodeExplication(CommandSyntaxNode command)
 
         public override int GetHashCode()
         {
-            return _nodes.UncheckedSum(n => n.GetHashCode());
+            unchecked
+            {
+                var hash = 17;
+                foreach (var node in _nodes)
+                    hash = hash * 31 + node.GetHashCode();
+                return hash;
+            }
         }
     }
 

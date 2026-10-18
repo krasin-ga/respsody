@@ -27,4 +27,36 @@ public class ComboCommand<T>
     {
         return _futureCompletion;
     }
+
+    internal async ValueTask<Outcome> Observe()
+    {
+        try
+        {
+            var result = await _futureCompletion;
+            return new Outcome(result.AsExternallyOwnedUnsafe<T>(), null);
+        }
+        catch (Exception exception)
+        {
+            return new Outcome(default, exception);
+        }
+    }
+
+    internal void Discard()
+    {
+        try
+        {
+            if (_futureCompletion.IsCompleted)
+                _futureCompletion.GetAwaiter().GetResult().Dispose();
+        }
+        catch (Exception)
+        {
+        }
+    }
+
+    internal readonly struct Outcome((T Result, IDisposable Lifetime) result, Exception? error) : IDisposable
+    {
+        public (T Result, IDisposable Lifetime) OwnedResult { get; } = result;
+        public Exception? Error { get; } = error;
+        public void Dispose() => OwnedResult.Lifetime?.Dispose();
+    }
 }

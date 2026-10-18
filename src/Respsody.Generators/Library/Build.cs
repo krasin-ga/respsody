@@ -83,7 +83,7 @@ internal static class Build
                             .WithInitializer(
                                 EqualsValueClause(
                                     ParseExpression(
-                                        $"ProtocolWriter.ConvertToBulkString(\"{command}\")"
+                                        $"ProtocolWriter.ConvertToBulkString({command.ToLiteral()})"
                                     )))
                     ))
         ).WithModifiers(
@@ -101,7 +101,7 @@ internal static class Build
         List<ParameterSyntax> parameters)
     {
         var methodIdentifier = methodNamePreference ?? CultureInfo.InvariantCulture.TextInfo.ToTitleCase(
-            command.ToLower()
+            command.ToLowerInvariant()
         );
 
         var method = MethodDeclaration(
@@ -112,7 +112,7 @@ internal static class Build
                 TokenList(isPublic ? Token(SyntaxKind.PublicKeyword) : Token(SyntaxKind.InternalKeyword),
                           Token(SyntaxKind.StaticKeyword)))
             .WithParameterList(
-                ParameterList(SeparatedList(parameters))
+                ParameterList(SeparatedList(parameters.Concat([Constants.CancellationTokenParameter])))
             );
 
         var body = Block();
@@ -140,17 +140,8 @@ internal static class Build
     List<List<NodeWithBuilder>> groups,
     bool allArgsFixedSize)
     {
-        parameters.Add(
-            Parameter(Identifier("cancellationToken"))
-                .WithType(ParseTypeName("CancellationToken"))
-                .WithDefault(EqualsValueClause(
-                                 LiteralExpression(
-                                     SyntaxKind.DefaultLiteralExpression,
-                                     Token(SyntaxKind.DefaultKeyword))))
-        );
-
         var methodIdentifier = (methodNamePreference ?? CultureInfo.InvariantCulture.TextInfo.ToTitleCase(
-            command.ToLower()
+            command.ToLowerInvariant()
         )) + "Command";
 
         var method = MethodDeclaration(
@@ -201,9 +192,7 @@ internal static class Build
                     sb.Append(nodeWithBuilder.Builder.GetUtf8Representation());
                 }
 
-                var text = $"{page}.Write(\"{sb}\"u8);";
-
-                text = text.EscapeLines();
+                var text = $"{page}.Write({sb.ToString().ToLiteral()}u8);";
 
                 bodyStatements.Add(
                     ParseStatement(text)
@@ -226,9 +215,23 @@ internal static class Build
     }
 
 
-    public static string EscapeLines(this string text)
+    public static MethodDeclarationSyntax LegacyCancellationOverload(MethodDeclarationSyntax builder)
     {
-        return text.Replace("\r", "\\r").Replace("\n", "\\n");
+        var arguments = string.Join(",", builder.ParameterList.Parameters.Select(parameter => parameter.Identifier));
+        var obsolete = Attribute(IdentifierName("Obsolete"))
+            .AddArgumentListArguments(AttributeArgument(LiteralExpression(
+                SyntaxKind.StringLiteralExpression,
+                Literal("Command builders do not execute commands. Pass cancellation to ExecuteCommand or the execution extension instead."))));
+
+        return builder
+            .AddParameterListParameters(Constants.CancellationTokenParameter.WithDefault(null))
+            .WithAttributeLists(SingletonList(AttributeList(SingletonSeparatedList(obsolete))))
+            .WithBody(Block(ParseStatement($"return {builder.Identifier}({arguments});")));
+    }
+
+    public static string ToLiteral(this string text)
+    {
+        return Literal(text).Text;
     }
 
     public static ClassDeclarationSyntax OptionTypes(
@@ -255,7 +258,7 @@ internal static class Build
                                         .WithInitializer(
                                             EqualsValueClause(
                                                 ParseExpression(
-                                                    $"ProtocolWriter.ConvertToBulkString(\"{option.Value}\")"
+                                                    $"ProtocolWriter.ConvertToBulkString({option.Value.ToLiteral()})"
                                                 )))
                                 )))
                     .WithModifiers(
@@ -389,6 +392,13 @@ internal static class Build
                         Token(SyntaxKind.ThisKeyword)))
                 .WithType(ParseTypeName("IRespClient"));
 
+        public static readonly ParameterSyntax CancellationTokenParameter =
+            Parameter(Identifier("cancellationToken"))
+                .WithType(ParseTypeName("CancellationToken"))
+                .WithDefault(EqualsValueClause(LiteralExpression(
+                    SyntaxKind.DefaultLiteralExpression,
+                    Token(SyntaxKind.DefaultKeyword))));
+
         public static readonly string GeneratorVersion = typeof(Build).Assembly.GetName().Version.ToString();
     }
 
@@ -451,13 +461,13 @@ internal static class Build
 
         public static ParameterSyntax ForOption(OptionSyntaxNode optionSyntaxNode)
         {
-            return Parameter(Identifier(optionSyntaxNode.Option.ToLower()))
+            return Parameter(Identifier(optionSyntaxNode.Option.ToLowerInvariant()))
                 .WithType(Type.For(optionSyntaxNode));
         }
 
         public static ParameterSyntax ForOptions(OptionSyntaxNode option)
         {
-            return Parameter(Identifier(option.Option.ToLower() + "Items")).WithType(
+            return Parameter(Identifier(option.Option.ToLowerInvariant() + "Items")).WithType(
                 ArrayType(Type.For(option), List([ArrayRankSpecifier()]))
             );
         }

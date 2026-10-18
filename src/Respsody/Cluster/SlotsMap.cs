@@ -1,5 +1,6 @@
 ﻿using Respsody.Cluster.Errors;
 using System.Diagnostics.CodeAnalysis;
+using Respsody.Exceptions;
 
 namespace Respsody.Cluster;
 
@@ -8,12 +9,12 @@ public class SlotsMap
     private const int MaxSlots = 16384;
     private readonly Dictionary<string, ClusterNode> _endpointToNode;
     private readonly Dictionary<string, ClusterNode> _endpointToPrimaryNode;
-    private readonly ClusterNode[] _slotToNode;
+    private readonly ClusterNode?[] _slotToNode;
     public bool IsUnstable { get; }
 
     public SlotsMap(IEnumerable<ClusterNode> nodes)
     {
-        _slotToNode = new ClusterNode[MaxSlots];
+        _slotToNode = new ClusterNode?[MaxSlots];
         _endpointToPrimaryNode = [];
         _endpointToNode = [];
         foreach (var clusterNode in nodes)
@@ -34,6 +35,9 @@ public class SlotsMap
             var nodeMetadata = clusterNode.Metadata;
             foreach (var range in nodeMetadata.Slots.Ranges)
             {
+                if (range.From > range.To || range.To >= MaxSlots)
+                    throw new FormatException($"Invalid slot range {range.From}-{range.To} for cluster node {clusterNode.Id}.");
+
                 if (range.State.StateKind != SpecialSlotState.Kind.None)
                 {
                     IsUnstable = true;
@@ -41,12 +45,17 @@ public class SlotsMap
                 }
 
                 foreach (var slot in range.GetSlots())
+                {
+                    if (_slotToNode[slot] is { } assigned && assigned.Id != clusterNode.Id)
+                        throw new FormatException($"Hash slot {slot} is assigned to multiple cluster nodes.");
                     _slotToNode[slot] = clusterNode;
+                }
             }
         }
     }
 
-    public ClusterNode GetNode(ushort slot) => _slotToNode[slot];
+    public ClusterNode GetNode(ushort slot) => _slotToNode[slot]
+        ?? throw new RespClusterCommandExecutionException($"No cluster node is assigned to hash slot {slot}.");
 
     public bool TryGetNodeByEndpoint(ReadOnlySpan<char> endpoint, [NotNullWhen(true)] out ClusterNode? clusterNode)
     {

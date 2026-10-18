@@ -1,12 +1,14 @@
-﻿namespace Respsody.Benchmarks.NonScientific.Library;
+﻿using System;
+
+namespace Respsody.Benchmarks.NonScientific.Library;
 
 public readonly record struct Delta<T>(T Before, T After)
     where T : IComparable<T>
 {
     public Delta<T> EnsureIncreasingOrEq()
     {
-        if (After.CompareTo(Before) <= 0)
-            throw new InvalidOperationException($"After:{After} <= Before:{Before}");
+        if (After.CompareTo(Before) < 0)
+            throw new InvalidOperationException($"After:{After} < Before:{Before}");
 
         return this;
     }

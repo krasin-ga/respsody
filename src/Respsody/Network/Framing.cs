@@ -239,22 +239,40 @@ public abstract class Framing<T>: IDisposable
         _cs = readyFrames;
     }
 
-    public void Reset()
+    public virtual void Reset()
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
         _hasCurrentSequence = false;
         _currentSequence = default;
         _awaitingMoreData = false;
         _alreadyConsumed = 0;
-        _tail.Clear();
+        ReleaseTail();
         _toSkip = 0;
         
         if (_currentBlock.Written > 0)
+        {
+            _currentBlock.Dispose();
             _currentBlock = _memoryBlocks.Lease(_receivingBlockSize);
+        }
+    }
+
+    private void ReleaseTail()
+    {
+        foreach (var block in _tail)
+            block.Dispose();
+        _tail.Clear();
     }
 
     public virtual void Dispose()
     {
+        if (_disposed)
+            return;
+
+        ReleaseTail();
         _currentBlock.Dispose();
+        _currentSequence = default;
+        _cs = null;
         _disposed = true;
         GC.SuppressFinalize(this);
     }

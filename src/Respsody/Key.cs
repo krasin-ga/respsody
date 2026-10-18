@@ -84,14 +84,16 @@ public readonly struct Key
         }
 
         var pooledBuffer = ArrayPool<byte>.Shared.Rent(byteCount);
-        pooledBuffer = pooledBuffer[..encoding.GetBytes(str, pooledBuffer)];
-        page.WriteBulkString(pooledBuffer);
-        var slot = calculate
-            ? CalculateHashSlot(pooledBuffer)
-            : Zero;
-        ArrayPool<byte>.Shared.Return(pooledBuffer);
-
-        return slot;
+        try
+        {
+            var span = pooledBuffer.AsSpan(0, encoding.GetBytes(str, pooledBuffer));
+            page.WriteBulkString(span);
+            return calculate ? CalculateHashSlot(span) : Zero;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(pooledBuffer);
+        }
     }
 
     public ushort CalculateHashSlot()
@@ -120,11 +122,15 @@ public readonly struct Key
         }
 
         var pooledBuffer = ArrayPool<byte>.Shared.Rent(byteCount);
-        pooledBuffer = pooledBuffer[..encoding.GetBytes(_string, pooledBuffer)];
-        var slot = CalculateHashSlot(pooledBuffer);
-        ArrayPool<byte>.Shared.Return(pooledBuffer);
-
-        return slot;
+        try
+        {
+            var span = pooledBuffer.AsSpan(0, encoding.GetBytes(_string, pooledBuffer));
+            return CalculateHashSlot(span);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(pooledBuffer);
+        }
     }
 
     private static ushort CalculateHashSlot(ReadOnlySpan<byte> key)

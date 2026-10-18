@@ -36,7 +36,7 @@ public class ClusterNode(RespClient client, NodeMetadata metadata)
         {
             0 => null,
             1 => _replicas[0],
-            _ => _replicas[Interlocked.Increment(ref _pointer) % replicasCount]
+            _ => _replicas[(int)((uint)Interlocked.Increment(ref _pointer) % (uint)replicasCount)]
         };
     }
 
@@ -51,7 +51,7 @@ public class ClusterNode(RespClient client, NodeMetadata metadata)
     {
         var nodeCount = _replicas.Count + 1;
 
-        var index = Interlocked.Increment(ref _pointer) % nodeCount;
+        var index = (int)((uint)Interlocked.Increment(ref _pointer) % (uint)nodeCount);
 
         return index == 0 ? Client : _replicas[index - 1].Client;
     }

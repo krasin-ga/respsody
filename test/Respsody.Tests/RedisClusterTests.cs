@@ -46,7 +46,7 @@ public class RedisClusterTests(RedisClusterFixture fixture, ITestOutputHelper @o
                             ConnectionTimeoutMs = options.ConnectionTimeoutMs,
                             ClientName = options.ClientName,
                             AuthOptions = options.AuthOptions,
-                            Endpoint = $"localhost:{endpoint.Split(":")[1]}"
+                            Endpoint = fixture.GetHostEndpoint(endpoint)
                         }
                     )
             });

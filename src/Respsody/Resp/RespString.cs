@@ -37,12 +37,19 @@ public readonly struct RespString : IRespResponse
 
     public string? ToString(Encoding encoding)
     {
-        return IsNull()
+        _guard.CheckDisposed();
+        return IsNullUnchecked()
             ? null
-            : encoding.GetString(GetSpan());
+            : encoding.GetString(GetSpanUnchecked());
     }
 
     public bool IsNull()
+    {
+        _guard.CheckDisposed();
+        return IsNullUnchecked();
+    }
+
+    private bool IsNullUnchecked()
     {
         return _frame.GetRespType() is RespType.Null
                || _frame.Context.Length == -1;
@@ -50,11 +57,14 @@ public readonly struct RespString : IRespResponse
 
     public ReadOnlySpan<char> AsUnicodeSpan()
     {
-        return IsNull() ? [] : MemoryMarshal.Cast<byte, char>(GetSpan());
+        _guard.CheckDisposed();
+        return IsNullUnchecked() ? [] : MemoryMarshal.Cast<byte, char>(GetSpanUnchecked());
     }
 
     public bool TryGetVerbatimFormat(out ReadOnlySpan<byte> span)
     {
+        _guard.CheckDisposed();
+
         if (_frame.GetRespType() != RespType.VerbatimString)
         {
             span = default;
@@ -68,7 +78,11 @@ public readonly struct RespString : IRespResponse
     public ReadOnlySpan<byte> GetSpan()
     {
         _guard.CheckDisposed();
+        return GetSpanUnchecked();
+    }
 
+    private ReadOnlySpan<byte> GetSpanUnchecked()
+    {
         switch (_frame.GetRespType())
         {
             case RespType.SimpleString:

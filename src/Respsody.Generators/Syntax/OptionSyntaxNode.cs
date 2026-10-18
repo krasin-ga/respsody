@@ -55,7 +55,7 @@ internal class OptionSyntaxNode : SyntaxNode
 
         public string GetParameterName()
         {
-            return node.Option.ToLower();
+            return node.Option.ToLowerInvariant();
         }
 
         public TypeSyntax GetParameterType()

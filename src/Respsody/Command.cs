@@ -185,8 +185,11 @@ public sealed class Command<T> : IDisposable
         if (owners != 0)
             return;
         
-        if(!_finalized)
+        if (!_finalized)
+        {
             FinalizeCommand();
+            OutgoingBuffer.FreeByDeliveryPipeline();
+        }
 
         OutgoingBuffer.FreeByOwner();
         _length = 0;

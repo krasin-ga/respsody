@@ -1,36 +1,31 @@
 ﻿using System.Threading.Tasks;
 using DotNet.Testcontainers.Builders;
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using Respsody.Client.Connection;
+using Respsody.Client.Connection.Options;
+using Respsody.Network;
 using DotNet.Testcontainers.Containers;
-using DotNet.Testcontainers.Networks;
 using Xunit;
 
 namespace Respsody.Tests.Library;
 
 public class RedisSingleNodeFixture : IAsyncLifetime
 {
-    private const int Port = 7100;
-    private const string NetworkName = "redis-single-node-net";
+    private const int Port = 6379;
     private const string RedisPassword = "hi there";
     private IContainer? _container;
-    private INetwork? _network;
 
     public string GetPassword()
         => RedisPassword;
 
+    public IConnectionProcedure CreateConnectionProcedure() => new FixtureConnectionProcedure(this);
+
     public async Task InitializeAsync()
     {
-        _network = new NetworkBuilder()
-            .WithName(NetworkName)
-            .Build();
-
-        await _network.CreateAsync();
-
-        _container = new ContainerBuilder()
-            .WithImage("redis:7.4.7")
-            .WithName($"redis-node-{Port}")
-            .WithNetwork(_network.Name)
-            .WithNetworkAliases($"redis-node-{Port}")
-            .WithPortBinding(Port, Port)
+        _container = new ContainerBuilder("redis:7.4.7")
+            .WithPortBinding(Port, assignRandomHostPort: true)
             .WithCommand(
                 "redis-server",
                 "--port",
@@ -41,7 +36,15 @@ public class RedisSingleNodeFixture : IAsyncLifetime
                 RedisPassword)
             .Build();
 
-        await _container.StartAsync();
+        try
+        {
+            await _container.StartAsync();
+        }
+        catch
+        {
+            await DisposeAsync();
+            throw;
+        }
     }
 
     public async Task Restart()
@@ -52,15 +55,26 @@ public class RedisSingleNodeFixture : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        if (_container is { })
-            await _container.StopAsync();
-
-        if (_network != null)
-            await _network.DeleteAsync();
+        var container = _container;
+        _container = null;
+        if (container is not null)
+            await container.DisposeAsync();
     }
 
     public string GetStringEndpoint()
     {
-        return $"localhost:{Port}";
+        return $"{_container!.Hostname}:{_container.GetMappedPublicPort(Port)}";
+    }
+
+    private sealed class FixtureConnectionProcedure(RedisSingleNodeFixture fixture) : IConnectionProcedure
+    {
+        public IReadOnlyDictionary<string, string?> Config { get; } = new Dictionary<string, string?>();
+        public TimeSpan Timeout => TimeSpan.FromSeconds(10);
+
+        public Task<ConnectedSocket> Connect(CancellationToken token) => new DefaultConnectionProcedure(new ConnectionOptions
+        {
+            Endpoint = fixture.GetStringEndpoint(),
+            AuthOptions = new AuthOptions { Password = RedisPassword }
+        }).Connect(token);
     }
 }

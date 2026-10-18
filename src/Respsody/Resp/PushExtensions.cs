@@ -13,9 +13,14 @@ public static class PushExtensions
 
         if (kind.EndsWith(Subscribe))
         {
+            var acknowledgement = respPush[1].ToRespString();
+            var isNull = acknowledgement.IsNull();
             handle = new SubscriptionHandle(
                 DefaultRespEncoding.Value.GetString(kind),
-                new Bytes(respPush[1].ToRespString().GetSpan().ToArray()));
+                isNull ? default : new Bytes(acknowledgement.GetSpan().ToArray()))
+            {
+                IsNull = isNull
+            };
 
             return true;
         }

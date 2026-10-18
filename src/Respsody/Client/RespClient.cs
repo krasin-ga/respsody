@@ -1,6 +1,7 @@
 ﻿using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using Respsody.Client.Options;
 using Respsody.Exceptions;
@@ -18,7 +19,8 @@ public sealed class RespClient(
     : IDirectRespClient, IStructuredSocketHandler<RespContext>, IDisposable
 {
     private readonly IRespClientHandler? _clientHandler = options.Handler;
-    private readonly SemaphoreSlim _initialConnectionLock = new(1);
+    private readonly object _initialConnectionLock = new();
+    private volatile bool _disposed;
     private readonly MemoryBlocks _memoryBlocks = options.MemoryBlocks;
     private readonly int _outgoingBlockSize = options.OutgoingMemoryBlockSize;
     private readonly IRespPushReceiver _pushReceiver = options.PushReceiver;
@@ -26,6 +28,7 @@ public sealed class RespClient(
     private readonly ConcurrentQueue<Payload> _responseQueue = new();
     private readonly bool _runContinuationsAsynchronously = options.RunContinuationsAsynchronously;
     private readonly ConcurrentQueue<SubUnSub> _subUnSubConfirmationsQueue = new();
+    private SubscriptionState? _subscriptions;
     private RespAggregate? _attribute;
     private GCHandle? _handlersHandle;
     private StructuredSocket<RespContext, Payload>? _structuredSocket;
@@ -42,46 +45,43 @@ public sealed class RespClient(
         if (connectionProcedure.Timeout > TimeSpan.Zero)
             cts.CancelAfter(connectionProcedure.Timeout);
 
-        await _initialConnectionLock.WaitAsync(cts.Token);
-
-        if (_structuredSocket is not null)
-        {
-            _initialConnectionLock.Release();
-
-            await _structuredSocket.Connected.WaitAsync(cts.Token);
-            return;
-        }
-
         try
         {
-            _structuredSocket = new StructuredSocket<RespContext, Payload>(
-                connectionProcedure,
-                new RespFraming(_memoryBlocks, options.IncomingMemoryBlockSize, options.ArrayPool),
-                options.SocketOption,
-                this
-            );
+            lock (_initialConnectionLock)
+            {
+                if (_disposed)
+                    throw new RespClientDisposedException();
 
-            if (_clientHandler != null)
-                _handlersHandle = GCHandle.Alloc(
-                    _memoryBlocks.AddEventHandlers(
-                        onCreate: _clientHandler.OnMemoryBlockCreated,
-                        onDestruct: _clientHandler.OnMemoryBlockDestructed,
-                        onResurrected: _clientHandler.OnMemoryBlockResurrected
-                    ),
-                    GCHandleType.Normal);
-            _structuredSocket.Start();
-            _ = Task.Run(CheckExpiredMessages, CancellationToken.None);
+                if (_structuredSocket is null)
+                {
+                    _structuredSocket = new StructuredSocket<RespContext, Payload>(
+                        connectionProcedure,
+                        new RespFraming(_memoryBlocks, options.IncomingMemoryBlockSize, options.ArrayPool),
+                        options.SocketOption,
+                        this
+                    );
+
+                    if (_clientHandler != null)
+                        _handlersHandle = GCHandle.Alloc(
+                            _memoryBlocks.AddEventHandlers(
+                                onCreate: _clientHandler.OnMemoryBlockCreated,
+                                onDestruct: _clientHandler.OnMemoryBlockDestructed,
+                                onResurrected: _clientHandler.OnMemoryBlockResurrected
+                            ),
+                            GCHandleType.Normal);
+                    _structuredSocket.Start();
+                    _ = CheckExpiredMessages();
+                }
+            }
 
             await _structuredSocket.Connected.WaitAsync(cts.Token);
 
         }
-        catch (TaskCanceledException tcs)
+        catch (OperationCanceledException exception)
         {
-            throw new TimeoutException($"Connection timed out after {connectionProcedure.Timeout}", tcs);
-        }
-        finally
-        {
-            _initialConnectionLock.Release();
+            if (_disposed)
+                throw new RespClientDisposedException();
+            throw new TimeoutException($"Connection timed out after {connectionProcedure.Timeout}", exception);
         }
     }
 
@@ -90,7 +90,7 @@ public sealed class RespClient(
         if (options.TimeoutCheckInterval <= TimeSpan.Zero)
             return;
 
-        var timer = new PeriodicTimer(options.TimeoutCheckInterval);
+        using var timer = new PeriodicTimer(options.TimeoutCheckInterval);
 
         while (await timer.WaitForNextTickAsync())
         {
@@ -99,7 +99,22 @@ public sealed class RespClient(
 
             var ticks = Environment.TickCount;
             foreach (var responseData in _responseQueue)
-                responseData.TryExpire(ticks);
+            {
+                try
+                {
+                    responseData.TryExpire(ticks);
+                }
+                catch (Exception exception)
+                {
+                    try
+                    {
+                        HandleConnectionError(exception);
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
         }
     }
 
@@ -124,9 +139,15 @@ public sealed class RespClient(
         if (_structuredSocket is null)
             return ConnectThenExecuteCommand(command, cancellationToken);
 
-        if (_structuredSocket.IsDisposed)
+        return ExecuteFinalizedCommand(command, cancellationToken);
+    }
+
+    private ValueTask<T> ExecuteFinalizedCommand<T>(Command<T> command, CancellationToken cancellationToken)
+        where T : IRespResponse
+    {
+        if (_structuredSocket!.IsDisposed)
         {
-            command.Dispose();
+            command.OutgoingBuffer.FreeByDeliveryPipeline();
             throw new RespClientDisposedException();
         }
 
@@ -134,26 +155,32 @@ public sealed class RespClient(
             _runContinuationsAsynchronously
         );
 
-        Bytes[]? subAcks = null;
-        var responseType = ResponseTypeMapping.GetResponseTypeEnum<T>();
-        if (responseType == ResponseType.Subscription)
+        try
         {
-            subAcks = CommandParser.ParseArgumentsSlow(command);
-            cancellationToken = CancellationToken.None;
-            command.WithTimeout(int.MaxValue);
+            Bytes[]? subAcks = null;
+            var responseType = ResponseTypeMapping.GetResponseTypeEnum<T>();
+            if (responseType == ResponseType.Subscription)
+            {
+                subAcks = CommandParser.ParseArgumentsSlow(command);
+            }
+
+            var payload = new Payload(
+                respClient: this,
+                taskCompletionSource: taskCompletionSource,
+                responseType: responseType,
+                command: command.CommandName ?? "<unknown>",
+                startTicks: Environment.TickCount,
+                timeout: command.Timeout,
+                subAcks: subAcks,
+                cancellationToken: cancellationToken);
+
+            _structuredSocket.Send(new TransmitUnit<Payload>(command.OutgoingBuffer, payload));
         }
-
-        var payload = new Payload(
-            respClient: this,
-            taskCompletionSource: taskCompletionSource,
-            responseType: responseType,
-            command: command.CommandName ?? "<unknown>",
-            startTicks: Environment.TickCount,
-            timeout: command.Timeout,
-            subAcks: subAcks,
-            cancellationToken: cancellationToken);
-
-        _structuredSocket.Send(new TransmitUnit<Payload>(command.OutgoingBuffer, payload));
+        catch (Exception exception)
+        {
+            command.OutgoingBuffer.FreeByDeliveryPipeline();
+            taskCompletionSource.SetException(exception);
+        }
 
         return taskCompletionSource.AsValueTask();
     }
@@ -161,11 +188,12 @@ public sealed class RespClient(
     public ComboCommand<T> Pack<T>(Combo combo, Command<T> command, CancellationToken token = default)
         where T : IRespResponse
     {
-        if (_structuredSocket?.IsDisposed is true)
-        {
-            command.Dispose();
+        if (_disposed || _structuredSocket?.IsDisposed is true)
             throw new RespClientDisposedException();
-        }
+
+        var responseType = ResponseTypeMapping.GetResponseTypeEnum<T>();
+        if (responseType == ResponseType.Subscription)
+            throw new InvalidOperationException("Cannot pack subscription");
 
         command.FinalizeCommand();
 
@@ -173,22 +201,27 @@ public sealed class RespClient(
             _runContinuationsAsynchronously
         );
 
-        var responseType = ResponseTypeMapping.GetResponseTypeEnum<T>();
-        if (responseType == ResponseType.Subscription)
-            throw new InvalidOperationException("Cannot pack subscription");
+        try
+        {
+            var payload = new Payload(
+                respClient: this,
+                taskCompletionSource: responseCompletionSource,
+                responseType: responseType,
+                command: "<combo>",
+                timeout: command.Timeout,
+                startTicks: Environment.TickCount,
+                cancellationToken: token);
 
-        var payload = new Payload(
-            respClient: this,
-            taskCompletionSource: responseCompletionSource,
-            responseType: responseType,
-            command: "<combo>",
-            timeout: command.Timeout,
-            startTicks: Environment.TickCount,
-            cancellationToken: token);
-
-        var comboCommand = new ComboCommand<T>(command, payload, responseCompletionSource.AsValueTask());
-        combo.AddPayload(comboCommand.TransmitUnit);
-        return comboCommand;
+            var comboCommand = new ComboCommand<T>(command, payload, responseCompletionSource.AsValueTask());
+            combo.AddPayload(comboCommand.TransmitUnit);
+            return comboCommand;
+        }
+        catch
+        {
+            command.OutgoingBuffer.FreeByDeliveryPipeline();
+            responseCompletionSource.ReturnUnused();
+            throw;
+        }
     }
 
     public void Execute(Combo combo)
@@ -212,8 +245,17 @@ public sealed class RespClient(
         if (command.Timeout > 0)
             linkedCts.CancelAfter(command.Timeout);
 
-        await Start().WaitAsync(linkedCts.Token);
-        return await ExecuteCommand(command, linkedCts.Token);
+        try
+        {
+            await Start().WaitAsync(linkedCts.Token);
+        }
+        catch
+        {
+            command.OutgoingBuffer.FreeByDeliveryPipeline();
+            throw;
+        }
+
+        return await ExecuteFinalizedCommand(command, linkedCts.Token);
     }
 
     public void HandleIncoming(ReadyFrames<RespContext> readyFrames)
@@ -253,22 +295,23 @@ public sealed class RespClient(
         {
             if (aggregate.ToRespPush(_dummyGuard).TryGetSubscription(out var data))
             {
-                var idx = 0;
                 foreach (var confirmation in _subUnSubConfirmationsQueue)
                 {
-                    if (confirmation.Handle(data.Command, data.Ack) is var res &&
+                    if (confirmation.Handle(data, _subscriptions) is var res &&
                         res != SubUnSub.HandleResult.Unhandled)
                     {
-                        if (_responseQueue.TryPeek(out var peeked) &&
-                            peeked.IsSubscription(confirmation.Command, confirmation.Acks))
-                            _responseQueue.TryDequeue(out _);
-
-                        if (idx == 0 && res == SubUnSub.HandleResult.Completed)
-                            _subUnSubConfirmationsQueue.TryDequeue(out _);
+                        if (res == SubUnSub.HandleResult.Completed)
+                            DequeueCompletedSubscriptions();
                         break;
                     }
+                }
 
-                    idx++;
+                if (!data.IsNull)
+                {
+                    if (SubscriptionState.IsSubscribe(data.Command))
+                        (_subscriptions ??= new SubscriptionState()).Add(data.Command, data.Ack);
+                    else
+                        _subscriptions?.Remove(data.Command, data.Ack);
                 }
 
                 aggregate.Dispose();
@@ -298,8 +341,16 @@ public sealed class RespClient(
 
         if (frame.Context.Type is RespType.BulkError or RespType.SimpleError)
         {
+            if (_subUnSubConfirmationsQueue.TryPeek(out var confirmation)
+                && payload.IsSubscription(confirmation.Command, confirmation.Acks))
+            {
+                _subUnSubConfirmationsQueue.TryDequeue(out _);
+                DequeueCompletedSubscriptions();
+            }
+            attribute?.Dispose();
             using var errorString = new RespString(frame, payload.Guard);
             var exception = new RespErrorResponseException(errorString.ToString(Encoding.UTF8) ?? "NULL");
+            NotifyRespError(exception);
             payload.CompleteWithException(exception, ticks);
             return;
         }
@@ -307,19 +358,71 @@ public sealed class RespClient(
         payload.Complete(frame, ticks, attribute);
     }
 
+    private void NotifyRespError(RespErrorResponseException exception)
+    {
+        foreach (var observer in options.RespErrorObservers)
+        {
+            try
+            {
+                observer(exception);
+            }
+            catch (Exception observerException)
+            {
+                try
+                {
+                    HandleConnectionError(observerException);
+                }
+                catch
+                {
+                }
+            }
+        }
+    }
+
+    private void DequeueCompletedSubscriptions()
+    {
+        while (_subUnSubConfirmationsQueue.TryPeek(out var confirmation) && confirmation.IsDone)
+        {
+            if (!_responseQueue.TryPeek(out var response)
+                || !response.IsSubscription(confirmation.Command, confirmation.Acks))
+                break;
+
+            _responseQueue.TryDequeue(out _);
+            _subUnSubConfirmationsQueue.TryDequeue(out _);
+        }
+    }
+
     public void OnDisconnected(Exception? exception, int generation)
     {
-        _clientHandler?.OnDisconnected(this, exception, generation);
+        Exception? failure = null;
+        try
+        {
+            _clientHandler?.OnDisconnected(this, exception, generation);
+        }
+        catch (Exception callbackException)
+        {
+            failure = callbackException;
+        }
 
         _respFrameAggregationStrategy.Reset();
+        _subscriptions = null;
+        _attribute?.Dispose();
+        _attribute = null;
 
         while (_responseQueue.TryPeek(out var response) && response.ConnectionGeneration <= generation)
         {
             if (!_responseQueue.TryDequeue(out _))
                 Panic("[on disconnected] failed to dequeue response for completion with error");
 
-            response.CompleteWithException(exception ?? new RespConnectionLostException(),
-                ticks: Environment.TickCount);
+            try
+            {
+                response.CompleteWithException(exception ?? new RespConnectionLostException(),
+                    ticks: Environment.TickCount);
+            }
+            catch (Exception callbackException)
+            {
+                failure ??= callbackException;
+            }
         }
 
         while (_subUnSubConfirmationsQueue.TryPeek(out var sub) && sub.ConnectionGeneration <= generation)
@@ -329,6 +432,9 @@ public sealed class RespClient(
 
             sub.CompleteWithException(exception ?? new RespConnectionLostException());
         }
+
+        if (failure is not null)
+            ExceptionDispatchInfo.Throw(failure);
     }
 
     public async ValueTask InitializeConnection(ConnectedSocket connectedSocket, int generation,
@@ -371,10 +477,15 @@ public sealed class RespClient(
 
     public void Dispose()
     {
-        _initialConnectionLock.Dispose();
-        _attribute?.Dispose();
-        _structuredSocket?.Dispose();
-        _handlersHandle?.Free();
+        lock (_initialConnectionLock)
+        {
+            if (_disposed)
+                return;
+            _disposed = true;
+            _structuredSocket?.Dispose();
+            _handlersHandle?.Free();
+            _handlersHandle = null;
+        }
     }
 
     internal struct Payload(
@@ -499,7 +610,17 @@ public sealed class RespClient(
                 return;
             }
 
-            respClient._clientHandler?.OnCommandExecuted(respClient, ticks - startTicks, command, _ctx);
+            try
+            {
+                respClient._clientHandler?.OnCommandExecuted(respClient, ticks - startTicks, command, _ctx);
+            }
+            catch (Exception exception)
+            {
+                aggregate.Dispose();
+                attribute?.Dispose();
+                taskCompletionSource.SetException(exception);
+                return;
+            }
 
             switch (responseType)
             {
@@ -546,9 +667,23 @@ public sealed class RespClient(
         public void Complete(Frame<RespContext> frame, int ticks, RespAggregate? attribute)
         {
             if (_ct?.TryComplete() is false)
+            {
+                frame.Dispose();
+                attribute?.Dispose();
                 return;
+            }
 
-            respClient._clientHandler?.OnCommandExecuted(respClient, ticks - startTicks, command, _ctx);
+            try
+            {
+                respClient._clientHandler?.OnCommandExecuted(respClient, ticks - startTicks, command, _ctx);
+            }
+            catch (Exception exception)
+            {
+                frame.Dispose();
+                attribute?.Dispose();
+                taskCompletionSource.SetException(exception);
+                return;
+            }
 
             switch (responseType)
             {
@@ -706,7 +841,7 @@ public sealed class RespClient(
         {
             return responseType is ResponseType.Subscription
                    && string.Equals(cmd, command, StringComparison.OrdinalIgnoreCase)
-                   && acks.SequenceEqual(subAcks!);
+                   && ReferenceEquals(acks, subAcks);
         }
     }
 
@@ -724,27 +859,51 @@ public sealed class RespClient(
             Completed
         }
 
-        private readonly HashSet<Bytes> _remainingAcks = [.. acks];
+        private readonly Dictionary<Bytes, int> _remainingAcks = CountAcknowledgements(acks);
+        private readonly bool _acknowledgeAll = acks.Length == 0 && SubscriptionState.IsUnsubscribe(command);
+        private Bytes[]? _resolvedAcks;
+        private bool _completed;
         public string Command => command;
         public Bytes[] Acks => acks;
         public int ConnectionGeneration => connectionGeneration;
 
-        public bool IsDone => _remainingAcks.Count == 0;
+        public bool IsDone => _completed;
 
-        public HandleResult Handle(string commandName, Bytes data)
+        public HandleResult Handle(SubscriptionHandle acknowledgement, SubscriptionState? subscriptions)
         {
-            if (_remainingAcks.Count == 0 || !string.Equals(Command, commandName, StringComparison.OrdinalIgnoreCase))
+            if (_completed || !string.Equals(Command, acknowledgement.Command, StringComparison.OrdinalIgnoreCase))
                 return HandleResult.Unhandled;
 
-            if (!_remainingAcks.Remove(data))
-                return HandleResult.Unhandled;
+            if (_acknowledgeAll && _resolvedAcks is null)
+            {
+                _resolvedAcks = subscriptions?.Get(Command)?.ToArray() ?? [];
+                foreach (var expected in _resolvedAcks)
+                    _remainingAcks.Add(expected, 1);
+            }
 
-            var result = _remainingAcks.Count == 0
+            if (acknowledgement.IsNull)
+            {
+                if (!_acknowledgeAll || _remainingAcks.Count != 0)
+                    return HandleResult.Unhandled;
+            }
+            else
+            {
+                if (!_remainingAcks.TryGetValue(acknowledgement.Ack, out var remaining))
+                    return HandleResult.Unhandled;
+
+                if (remaining == 1)
+                    _remainingAcks.Remove(acknowledgement.Ack);
+                else
+                    _remainingAcks[acknowledgement.Ack] = remaining - 1;
+            }
+
+            _completed = _remainingAcks.Count == 0;
+            var result = _completed
                 ? HandleResult.Completed
                 : HandleResult.Handled;
 
             if (result == HandleResult.Completed && ct.TryComplete())
-                taskCompletionSource.SetResult(new RespSubscriptionAck(Acks));
+                taskCompletionSource.SetResult(new RespSubscriptionAck(_resolvedAcks ?? Acks));
 
             return result;
         }
@@ -754,5 +913,54 @@ public sealed class RespClient(
             if (ct.TryComplete())
                 taskCompletionSource.SetException(exception);
         }
+
+        private static Dictionary<Bytes, int> CountAcknowledgements(Bytes[] expected)
+        {
+            var counts = new Dictionary<Bytes, int>(expected.Length);
+            foreach (var acknowledgement in expected)
+                CollectionsMarshal.GetValueRefOrAddDefault(counts, acknowledgement, out _)++;
+            return counts;
+        }
+    }
+
+    private sealed class SubscriptionState
+    {
+        private HashSet<Bytes>? _channels;
+        private HashSet<Bytes>? _patterns;
+        private HashSet<Bytes>? _shards;
+
+        public static bool IsSubscribe(string command)
+            => string.Equals(command, "SUBSCRIBE", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(command, "PSUBSCRIBE", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(command, "SSUBSCRIBE", StringComparison.OrdinalIgnoreCase);
+
+        public static bool IsUnsubscribe(string command)
+            => string.Equals(command, "UNSUBSCRIBE", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(command, "PUNSUBSCRIBE", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(command, "SUNSUBSCRIBE", StringComparison.OrdinalIgnoreCase);
+
+        public HashSet<Bytes>? Get(string command)
+        {
+            if (string.Equals(command, "UNSUBSCRIBE", StringComparison.OrdinalIgnoreCase))
+                return _channels;
+            if (string.Equals(command, "PUNSUBSCRIBE", StringComparison.OrdinalIgnoreCase))
+                return _patterns;
+            if (string.Equals(command, "SUNSUBSCRIBE", StringComparison.OrdinalIgnoreCase))
+                return _shards;
+            return null;
+        }
+
+        public void Add(string command, Bytes acknowledgement)
+        {
+            if (string.Equals(command, "SUBSCRIBE", StringComparison.OrdinalIgnoreCase))
+                (_channels ??= []).Add(acknowledgement);
+            else if (string.Equals(command, "PSUBSCRIBE", StringComparison.OrdinalIgnoreCase))
+                (_patterns ??= []).Add(acknowledgement);
+            else if (string.Equals(command, "SSUBSCRIBE", StringComparison.OrdinalIgnoreCase))
+                (_shards ??= []).Add(acknowledgement);
+        }
+
+        public void Remove(string command, Bytes acknowledgement)
+            => Get(command)?.Remove(acknowledgement);
     }
 }

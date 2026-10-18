@@ -48,7 +48,16 @@ public sealed class DirectSocketRpc: IDisposable
         commandBuilder(cmd);
         cmd.FinalizeCommand();
 
-        await _socket.SendAsync(cmd.OutgoingBuffer.AsSegmentList()).WaitAsync(token);
+        using var cancellation = token.UnsafeRegister(static state => ((Socket)state!).Dispose(), _socket);
+        try
+        {
+            token.ThrowIfCancellationRequested();
+            await SocketWriter.SendAllAsync(_socket, cmd.OutgoingBuffer.AsSegmentList(), SocketFlags.None);
+        }
+        finally
+        {
+            cmd.OutgoingBuffer.FreeByDeliveryPipeline();
+        }
 
         while (!token.IsCancellationRequested)
         {
@@ -77,7 +86,6 @@ public sealed class DirectSocketRpc: IDisposable
                         out var variant))
                     continue;
 
-                cmd.OutgoingBuffer.FreeByDeliveryPipeline();
                 return new RespResponse(
                     variant.Simple, 
                     variant.Aggregate, 
@@ -86,12 +94,13 @@ public sealed class DirectSocketRpc: IDisposable
             }
         }
 
-        cmd.OutgoingBuffer.FreeByDeliveryPipeline();
         throw new RespConnectionException($"Error getting reply for {command} command");
     }
 
     public void Dispose()
     {
+        _frameAggregationStrategy.Reset();
         _sequence.Dispose();
+        _semaphoreSlim.Dispose();
     }
 }
