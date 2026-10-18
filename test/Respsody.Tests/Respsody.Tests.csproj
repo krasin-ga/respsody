@@ -23,4 +23,8 @@
     <ProjectReference Include="..\..\src\Respsody\Respsody.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="..\..\util\Respsody.Benchmarks.NonScientific\Library\Delta.cs" Link="BenchmarkLibrary\Delta.cs" />
+  </ItemGroup>
+
 </Project>
