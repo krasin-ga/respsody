@@ -38,10 +38,10 @@ OutputEncoding = Encoding.Unicode;
 WriteLine("- MGET result -");
 Write("strings: ");
 Write(mgetResponse[0].ToRespString());
-WriteLine(mgetResponse[1].ToRespString().AsUnicodeSpan());
+Out.WriteLine(mgetResponse[1].ToRespString().AsUnicodeSpan());
 
 Write("byte[]: ");
-WriteLine($"{string.Join(",", [..mgetResponse[2].ToRespString().GetSpan()])}");
+WriteLine($"{string.Join(",", mgetResponse[2].ToRespString().GetSpan().ToArray())}");
 
 //define and generate commands:
 [RespCommand("GET key", ResponseType.String)]
@@ -54,14 +54,23 @@ public static class Commands;
 
 Cluster usage:
 
-```csharp
-using Respsody.Cluster;
+This example reuses the command declarations above. Automatic redirection is disabled by default; enabling it permits one retry after a MOVED or ASK reply, provided the destination endpoint is already known to the router.
 
-var clusterRouter = new ClusterRouter(
+Multi-key commands such as MSET and MGET require all keys in each command to share a hash slot. Group by slot before sending; keys with the same hash tag, such as `{user:1}:name` and `{user:1}:email`, share a slot.
+
+```csharp
+using Respsody;
+using Respsody.Client.Options;
+using Respsody.Cluster;
+using Respsody.Cluster.Options;
+using System.Linq;
+
+using var clusterRouter = new ClusterRouter(
     new ClusterRouterOptions
     {
         SeedEndpoints = ["some_cluster_host1:6379", "some_cluster_host2:6379"],
-        ClientOptions = new RespClientOptions()
+        ClientOptions = new RespClientOptions(),
+        EnableAutoRedirections = true
     });
 
 await clusterRouter.Initialize();
@@ -72,10 +81,11 @@ using var v1 = await clusterRouter.RouteTo(RolePreference.Primary).Get(Key.Utf8(
 // pick random node and execute COMMAND DOCS on it
 using var docs = await clusterRouter.PickRandom().Command(COMMAND.DOCS);
 
-//group objects by node and execute commands on it
+// Group objects by hash slot and route each MSET to its primary.
 (Key Key, Value Value)[] objects = [(Key.Utf8("k_1"), Value.Utf8("v_1")), /* ... */ (Key.Utf8("k_n"), Value.Utf8("v_n"))];
-foreach (var (node, nodeObjects)in clusterRouter.RouteTo(RolePreference.Primary).GroupBy(objects, o => o.Key))
-    await node.Mset(nodeObjects);
+var primaryRouter = clusterRouter.RouteTo(RolePreference.Primary);
+foreach (var slotGroup in objects.GroupBy(o => o.Key.CalculateHashSlot()))
+    await primaryRouter.Mset(slotGroup.ToArray());
 
 ```
 
@@ -85,5 +95,5 @@ This project is an independent work and is not endorsed, supported, or certified
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is licensed under the [MIT License](https://github.com/krasin-ga/respsody/blob/main/LICENSE).
 

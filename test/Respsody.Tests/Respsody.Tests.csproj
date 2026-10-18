@@ -25,6 +25,7 @@
 
   <ItemGroup>
     <Compile Include="..\..\util\Respsody.Benchmarks.NonScientific\Library\Delta.cs" Link="BenchmarkLibrary\Delta.cs" />
+    <Compile Include="..\..\util\Respsody.Benchmarks.NonScientific\Comparison\ComparisonOptions.cs" Link="BenchmarkLibrary\ComparisonOptions.cs" />
   </ItemGroup>
 
 </Project>

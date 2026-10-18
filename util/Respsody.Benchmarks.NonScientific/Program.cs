@@ -17,6 +17,12 @@ using Respsody.Client.Connection.Options;
 using Respsody.Client.Options;
 using StackExchange.Redis;
 
+if (!args.Contains("--legacy", StringComparer.Ordinal))
+{
+    await Respsody.Benchmarks.NonScientific.Comparison.ComparisonRunner.Run(args);
+    return;
+}
+
 // ReSharper disable All
 ThreadPool.SetMaxThreads(Environment.ProcessorCount, Environment.ProcessorCount);
 
@@ -26,7 +32,7 @@ var ipEndPoint = new IPEndPoint(IPAddress.Loopback, 6379);
 
 // using var garnet = new GarnetServer(
 //     new GarnetServerOptions
-//     {
+//     {w
 //         EndPoints = [ipEndPoint],
 //         logger = new ConsoleLoggerProvider(
 //                 new OptionsMonitor<ConsoleLoggerOptions>(

@@ -9,8 +9,9 @@
 - Compatibility with any RESP3-compliant server, including Redis, Garnet, Dragonfly, Valkey, and others
 - Code generation for arbitrary commands
 - Efficient memory usage through scoped buffer reuse
-- Full Redis Cluster protocol support with advanced routing: primary/replica node targeting, slot-aware command dispatch, and optimized MGETs by grouping keys per responsible node
+- Redis Cluster routing by hash slot, primary/replica selection, and optional MOVED/ASK redirection handling
 
+See the [architecture guide](docs/architecture.md) for command execution, response processing, and buffer ownership.
 
 ## Installation
 
@@ -19,7 +20,10 @@ dotnet add package respsody --prerelease
 ```
 
 ## Benchmarks
+
 Tested against the StackExchange.Redis client. Click on the spoilers to reveal the results.
+
+These benchmarks were performed on the first version of Respsody and may be outdated.
 
 >Hardware: AMD Ryzen 9 3900X, 1 CPU, 24 logical and 12 physical cores
 
@@ -80,31 +84,31 @@ Windows 11, .NET 9.0.5 <br>
 | Scenario                              | Target             | Dataset                    | Iterations | TotalElapsed |  BestRun |  CpuTime | TotalAllocated |
 |---------------------------------------|--------------------|----------------------------|------------|--------------|----------|----------|----------------|
 | SetGet_Sequential                     | Respsody           | small_20K 20000KV 2.45 MiB |         50 |      157.19s |    2.97s |  179.31s |      46.77 MiB |
-| SetGet_Sequential                     | StackOverflowRedis | small_20K 20000KV 2.45 MiB |         50 |      209.82s |    3.82s |  218.55s |     667.54 MiB |
+| SetGet_Sequential                     | StackExchange.Redis | small_20K 20000KV 2.45 MiB |         50 |      209.82s |    3.82s |  218.55s |     667.54 MiB |
 | -                                     | -                  | -                          |          - |            - |        - |        - |              - |
 | SetGet_Sequential                     | Respsody           | large_300 300KV 151.62 MiB |         50 |       13.61s | 184.48ms |    8.78s |       9.69 MiB |
-| SetGet_Sequential                     | StackOverflowRedis | large_300 300KV 151.62 MiB |         50 |       24.22s | 372.82ms |   14.38s |       7.42 GiB |
+| SetGet_Sequential                     | StackExchange.Redis | large_300 300KV 151.62 MiB |         50 |       24.22s | 372.82ms |   14.38s |       7.42 GiB |
 | -                                     | -                  | -                          |          - |            - |        - |        - |              - |
 | SetGet_Sequential_WithJsonDeserialize | Respsody           | jsons_10K 10000KV 2.25 MiB |         50 |       90.31s |    1.73s |  107.67s |     461.92 MiB |
-| SetGet_Sequential_WithJsonDeserialize | StackOverflowRedis | jsons_10K 10000KV 2.25 MiB |         50 |      128.20s |    2.16s |  128.30s |       1.04 GiB |
+| SetGet_Sequential_WithJsonDeserialize | StackExchange.Redis | jsons_10K 10000KV 2.25 MiB |         50 |      128.20s |    2.16s |  128.30s |       1.04 GiB |
 | -                                     | -                  | -                          |          - |            - |        - |        - |              - |
 | SetGet_WhenEach                       | Respsody           | small_20K 20000KV 2.45 MiB |         50 |        1.47s |  24.02ms |    9.09s |     316.49 MiB |
-| SetGet_WhenEach                       | StackOverflowRedis | small_20K 20000KV 2.45 MiB |         50 |        2.38s |  34.12ms |   15.62s |     852.86 MiB |
+| SetGet_WhenEach                       | StackExchange.Redis | small_20K 20000KV 2.45 MiB |         50 |        2.38s |  34.12ms |   15.62s |     852.86 MiB |
 | -                                     | -                  | -                          |          - |            - |        - |        - |              - |
 | OneSetTwoGets_WhenEach                | Respsody           | small_20K 20000KV 2.45 MiB |         50 |        1.74s |  30.78ms |   16.52s |     387.12 MiB |
-| OneSetTwoGets_WhenEach                | StackOverflowRedis | small_20K 20000KV 2.45 MiB |         50 |        3.29s |  52.22ms |   21.67s |       1.24 GiB |
+| OneSetTwoGets_WhenEach                | StackExchange.Redis | small_20K 20000KV 2.45 MiB |         50 |        3.29s |  52.22ms |   21.67s |       1.24 GiB |
 | -                                     | -                  | -                          |          - |            - |        - |        - |              - |
 | SetGet_WhenEach_WithJsonDeserialize   | Respsody           | jsons_10K 10000KV 2.25 MiB |         50 |     763.14ms |  13.88ms |    4.33s |     597.01 MiB |
-| SetGet_WhenEach_WithJsonDeserialize   | StackOverflowRedis | jsons_10K 10000KV 2.25 MiB |         50 |        1.24s |  20.73ms |    7.42s |       1.12 GiB |
+| SetGet_WhenEach_WithJsonDeserialize   | StackExchange.Redis | jsons_10K 10000KV 2.25 MiB |         50 |        1.24s |  20.73ms |    7.42s |       1.12 GiB |
 | -                                     | -                  | -                          |          - |            - |        - |        - |              - |
 | OneSetTwoGets_WhenEach                | Respsody           | large_300 300KV 151.62 MiB |         50 |       18.14s | 280.61ms |   12.23s |      74.49 MiB |
-| OneSetTwoGets_WhenEach                | StackOverflowRedis | large_300 300KV 151.62 MiB |         50 |       23.55s | 339.96ms |   22.36s |      15.23 GiB |
+| OneSetTwoGets_WhenEach                | StackExchange.Redis | large_300 300KV 151.62 MiB |         50 |       23.55s | 339.96ms |   22.36s |      15.23 GiB |
 | -                                     | -                  | -                          |          - |            - |        - |        - |              - |
 | MSetGet                               | Respsody           | small_20K 20000KV 2.45 MiB |         50 |     649.52ms |   8.35ms | 890.62ms |     157.21 KiB |
-| MSetGet                               | StackOverflowRedis | small_20K 20000KV 2.45 MiB |         50 |        1.07s |  16.51ms |    1.78s |     241.06 MiB |
+| MSetGet                               | StackExchange.Redis | small_20K 20000KV 2.45 MiB |         50 |        1.07s |  16.51ms |    1.78s |     241.06 MiB |
 | -                                     | -                  | -                          |          - |            - |        - |        - |              - |
 | MSetGet                               | Respsody           | large_300 300KV 151.62 MiB |         50 |        9.27s | 165.54ms |    5.00s |      11.91 MiB |
-| MSetGet                               | StackOverflowRedis | large_300 300KV 151.62 MiB |         50 |       22.07s | 297.64ms |   43.58s |      27.06 GiB |
+| MSetGet                               | StackExchange.Redis | large_300 300KV 151.62 MiB |         50 |       22.07s | 297.64ms |   43.58s |      27.06 GiB |
 </details>
 
 ## Quick Start
@@ -142,10 +146,10 @@ OutputEncoding = Encoding.Unicode;
 WriteLine("- MGET result -");
 Write("strings: ");
 Write(mgetResponse[0].ToRespString());
-WriteLine(mgetResponse[1].ToRespString().AsUnicodeSpan());
+Out.WriteLine(mgetResponse[1].ToRespString().AsUnicodeSpan());
 
 Write("byte[]: ");
-WriteLine($"{string.Join(",", [..mgetResponse[2].ToRespString().GetSpan()])}");
+WriteLine($"{string.Join(",", mgetResponse[2].ToRespString().GetSpan().ToArray())}");
 
 //define and generate commands:
 [RespCommand("GET key", ResponseType.String)]
@@ -153,19 +157,31 @@ WriteLine($"{string.Join(",", [..mgetResponse[2].ToRespString().GetSpan()])}");
 [RespCommand("MGET key [key ...]", ResponseType.Array)]
 [RespCommand("MSET key value [key value ...]", ResponseType.Void)]
 [RespCommand("COMMAND DOCS [command-name:string [command-name:string ...]]", ResponseType.Map)]
+[RespCommand("MULTI", ResponseType.Void)]
+[RespCommand("INCR key", ResponseType.Number)]
+[RespCommand("EXEC", ResponseType.Array)]
 public static class Commands;
 ```
 
 Cluster usage:
 
-```csharp
-using Respsody.Cluster;
+This example reuses the command declarations above. Automatic redirection is disabled by default; enabling it permits one retry after a MOVED or ASK reply, provided the destination endpoint is already known to the router.
 
-var clusterRouter = new ClusterRouter(
+Multi-key commands such as MSET and MGET require all keys in each command to share a hash slot. Group by slot before sending; keys with the same hash tag, such as `{user:1}:name` and `{user:1}:email`, share a slot.
+
+```csharp
+using Respsody;
+using Respsody.Client.Options;
+using Respsody.Cluster;
+using Respsody.Cluster.Options;
+using System.Linq;
+
+using var clusterRouter = new ClusterRouter(
     new ClusterRouterOptions
     {
         SeedEndpoints = ["some_cluster_host1:6379", "some_cluster_host2:6379"],
-        ClientOptions = new RespClientOptions()
+        ClientOptions = new RespClientOptions(),
+        EnableAutoRedirections = true
     });
 
 await clusterRouter.Initialize();
@@ -176,10 +192,11 @@ using var v1 = await clusterRouter.RouteTo(RolePreference.Primary).Get(Key.Utf8(
 // pick random node and execute COMMAND DOCS on it
 using var docs = await clusterRouter.PickRandom().Command(COMMAND.DOCS);
 
-//group objects by node and execute commands on it
+// Group objects by hash slot and route each MSET to its primary.
 (Key Key, Value Value)[] objects = [(Key.Utf8("k_1"), Value.Utf8("v_1")), /* ... */ (Key.Utf8("k_n"), Value.Utf8("v_n"))];
-foreach (var (node, nodeObjects)in clusterRouter.RouteTo(RolePreference.Primary).GroupBy(objects, o => o.Key))
-    await node.Mset(nodeObjects);
+var primaryRouter = clusterRouter.RouteTo(RolePreference.Primary);
+foreach (var slotGroup in objects.GroupBy(o => o.Key.CalculateHashSlot()))
+    await primaryRouter.Mset(slotGroup.ToArray());
 
 ```
 
@@ -190,13 +207,17 @@ foreach (var (node, nodeObjects)in clusterRouter.RouteTo(RolePreference.Primary)
 * No specialized API for selecting logical databases
 * No flow control/backpressure — use an external rate limiter
 * No support for Sentinel
-* No dedicated API for transactions. They can be made with command combos, though the approach is a bit hacky:
-```
-    using var comboResult = await Combo.Build(client)
-        .Cmd(r => r.MultiCommand())
-        .Cmd(r => r.IncrVoidCommand(key)) // Void overload used to avoid processing the -QUEUED response
-        .Cmd(r => r.ExecCommand())
-        .Execute();
+* No dedicated transaction API. MULTI and EXEC can be submitted together with the queued commands in a Combo.
+
+The transaction example uses `client` and the command declarations from the quick start:
+
+```csharp
+var counterKey = Key.Utf8("counter");
+using var comboResult = await Combo.Build(client)
+    .Cmd(r => r.MultiCommand())
+    .Cmd(r => r.IncrVoidCommand(counterKey)) // Consume the +QUEUED acknowledgment without converting it to a number.
+    .Cmd(r => r.ExecCommand())
+    .Execute();
 ```
 
 ## Contributing

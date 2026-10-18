@@ -1,6 +1,6 @@
 # Request, response, and ownership paths
 
-Respsody aims to minimize CPU work, allocation, copying, and coordination per RESP/Redis operation. The paths below describe the implementation after the review fixes; they do not establish that it is allocation-free or faster than other clients. See [the code review](../ca_review.md) for the resolution record and validation limits.
+Respsody aims to minimize CPU work, allocation, copying, and coordination per RESP/Redis operation. The paths below describe the current implementation; they do not establish that it is allocation-free or faster than other clients.
 
 ## A command on an established connection
 
@@ -147,10 +147,3 @@ Cluster routing sits above this per-connection pipeline: `RoleRouter` records co
 
 Sources: [StructuredSocket](../src/Respsody/Network/StructuredSocket.cs), [RespClient](../src/Respsody/Client/RespClient.cs), [ClusterRouter](../src/Respsody/Cluster/ClusterRouter.cs).
 
-## Measuring progress toward minimum overhead
-
-Evaluate changes against correctly completed, validated operations. Lost commands, ignored partial sends, abandoned futures, and unreleased responses can make throughput or allocation numbers look better while invalidating the workload.
-
-Measure steady-state allocations and CPU per operation alongside throughput, latency percentiles, bytes copied, socket calls, GC activity, and retained pooled memory. Include small and large payloads, fragmented replies, aggregate responses, several pipeline depths, and saturation; report connection/warmup costs separately. Keep server, transport, command semantics, response conversion, and disposal equivalent when comparing clients.
-
-Current cost centers include one `CompletionGuard` allocation per payload, channel/response-queue coordination, block reference counting, staging copies, fragmented-frame copies, continuation scheduling, timeout scans, and optional application callbacks. Pooled lists and builders also have growth or allocation costs. Each is a measurement target, not a reason to add synchronization, abstraction, or caching without evidence that it improves the relevant workload. Record benchmark configuration and results before making a fastest-client claim.

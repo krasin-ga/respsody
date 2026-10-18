@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/doc/">
     <File Path="assets/NugetReadme.md" />
+    <File Path="docs/architecture.md" />
     <File Path="Readme.md" />
     <File Path="THIRD-PARTY-NOTICES.md" />
   </Folder>

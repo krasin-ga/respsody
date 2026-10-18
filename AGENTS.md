@@ -2,7 +2,7 @@
 
 ## Project Goal
 
-Respsody aims to be the most performant RESP/Redis client, with the lowest possible overhead. Treat that as an engineering target to demonstrate with reproducible measurements, not an established ranking or a promise that every path is allocation-free.
+Respsody is built to push RESP/Redis client performance to its limits, with the lowest possible overhead. Treat that as an engineering target to demonstrate with reproducible measurements, not an established ranking or a promise that every path is allocation-free.
 
 - Preserve correct RESP semantics, command ordering, buffer ownership, and completion behavior. Dropped work, leaked buffers, or incomplete sends invalidate performance results.
 - Prioritize CPU cost per command, allocations and GC pressure, bytes copied, synchronization, socket operations, throughput, and latency under load. Include retained pool memory and cold-start costs where relevant.
@@ -82,7 +82,7 @@ Buffer-backed responses are structs with shared ownership state. Dispose the roo
 
 `Key` and `Value` support string encodings and byte memory. Generated execution methods manage command disposal; manually created commands require explicit ownership management. `Combo` queues a group of commands as one channel item, avoiding per-command response waits. It does not guarantee one socket send, one packet, or transaction semantics. Fluent builders consume all member outcomes and release successful response lifetimes if a member fails; low-level callers manage their futures explicitly.
 
-See [diagram.md](docs/diagram.md) for detailed execution and memory flows.
+See [architecture.md](docs/architecture.md) for detailed execution and memory flows.
 
 ## Benchmarks
 
@@ -91,9 +91,9 @@ dotnet run -c Release --project util/Respsody.Benchmarks
 dotnet run -c Release --project util/Respsody.Benchmarks.NonScientific
 ```
 
-Inspect each `Program.cs` before running: scenarios and settings are selected in code. The BenchmarkDotNet entry point currently runs `SequentialBenchmark` and starts embedded Garnet on loopback port 6399; other benchmark classes are not selected automatically. The manual harness expects an already running server on loopback port 6379. The README tables describe historical .NET 9.0.5 runs; current utility projects target .NET 10, so those tables are not current-checkout validation.
+Inspect each `Program.cs` before running. The BenchmarkDotNet entry point currently runs `SequentialBenchmark` and starts embedded Garnet on loopback port 6399; other benchmark classes are not selected automatically. The manual harness defaults to isolated SET+GET comparisons against an external server on loopback port 6379, with configurable payloads, concurrency, and borrowed/owned responses; see [benchmark-comparison.md](docs/benchmark-comparison.md). Its previous scenarios remain available through `--legacy`. The README tables describe historical .NET 9.0.5 runs; current utility projects target .NET 10, so those tables are not current-checkout validation.
 
-Use the manual harness for exploration and inspect its measurement limitations in [ca_review.md](ca_review.md). For comparisons, record commit, hardware, OS, runtime, client/server versions, GC configuration, payload size, concurrency, and operation definition. Separate borrowed-buffer consumption from string/array/JSON materialization. Report latency percentiles separately from throughput-derived time per operation.
+Use the manual harness for exploration and inspect its methodology and measurement limitations in [benchmark-comparison.md](docs/benchmark-comparison.md). For comparisons, record commit, hardware, OS, runtime, client/server versions, GC configuration, payload size, concurrency, and operation definition. Separate borrowed-buffer consumption from string/array/JSON materialization. Report latency percentiles separately from throughput-derived time per operation.
 
 ## Conventions
 
@@ -102,7 +102,3 @@ Use the manual harness for exploration and inspect its measurement limitations i
 - Use xUnit `[Theory]`/`[Fact]` and fixtures where appropriate; use `ITestOutputHelper` for test diagnostics.
 - Existing integration tests use fixed delays and polling. Prefer observable completion with bounded waits for new lifecycle tests; there is no `[TimeStamped]` test convention in this tree.
 - Add focused regressions for demonstrated correctness bugs. Performance tests should validate equivalent work and ownership, not merely count completed calls.
-
-## Review Status
-
-[ca_review.md](ca_review.md) records resolved findings, validation evidence, measurement limits, and the historical diagnosis at `433d741`. Consult its resolution table before treating a historical finding as an open defect. Neither a review nor passing tests establish exhaustive correctness or a fastest-client ranking.
